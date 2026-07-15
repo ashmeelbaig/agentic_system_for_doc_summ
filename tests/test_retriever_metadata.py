@@ -1,4 +1,24 @@
 from src.retriever import extract_chunk_texts
+import numpy as np
+
+class DummyEmbeddingModel:
+    def __init__(self):
+        self.last_inputs = None
+
+    def encode(self, inputs, convert_to_numpy=True, show_progress_bar=False):
+        self.last_inputs = inputs
+
+        vectors = []
+
+        for text in inputs:
+            text = text.lower()
+
+            if "first" in text or "query" in text:
+                vectors.append([1.0, 0.0])
+            else:
+                vectors.append([0.0, 1.0])
+
+        return np.array(vectors, dtype="float32")
 
 
 def test_extract_chunk_texts_from_string_chunks():
@@ -81,23 +101,6 @@ import numpy as np
 
 from src.retriever import FaissRetriever
 
-
-class DummyEmbeddingModel:
-    def __init__(self):
-        self.last_inputs = None
-
-    def encode(self, inputs, convert_to_numpy=True, show_progress_bar=False):
-        self.last_inputs = inputs
-
-        return np.array(
-            [
-                [1.0, 0.0],
-                [0.0, 1.0],
-            ],
-            dtype="float32",
-        )
-
-
 def test_build_index_uses_text_from_metadata_chunks():
     dummy_model = DummyEmbeddingModel()
 
@@ -131,3 +134,45 @@ def test_build_index_uses_text_from_metadata_chunks():
 
     assert retriever.chunks == chunks
     assert retriever.index.ntotal == 2
+
+def test_retrieve_evidence_returns_metadata_chunks():
+    dummy_model = DummyEmbeddingModel()
+
+    retriever = FaissRetriever.__new__(FaissRetriever)
+    retriever.model_name = "dummy-model"
+    retriever.model = dummy_model
+    retriever.index = None
+    retriever.chunks = []
+
+    chunks = [
+        {
+            "chunk_id": "sample_p1_c0",
+            "source": "sample.pdf",
+            "page_number": 1,
+            "text": "First metadata chunk text.",
+        },
+        {
+            "chunk_id": "sample_p2_c0",
+            "source": "sample.pdf",
+            "page_number": 2,
+            "text": "Second metadata chunk text.",
+        },
+    ]
+
+    retriever.build_index(chunks)
+
+    results = retriever.retrieve_evidence(
+        query="first chunk query",
+        top_k=1,
+    )
+
+    assert isinstance(results, list)
+    assert len(results) == 1
+
+    first_result = results[0]
+
+    assert first_result["chunk_id"] == "sample_p1_c0"
+    assert first_result["source"] == "sample.pdf"
+    assert first_result["page_number"] == 1
+    assert first_result["text"] == "First metadata chunk text."
+    assert isinstance(first_result["score"], float)

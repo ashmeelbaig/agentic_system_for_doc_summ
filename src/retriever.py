@@ -105,7 +105,7 @@ class FaissRetriever:
     def build_index(self, chunks: List) -> None:
         """
         chunks: List of text chunks or metadata-aware chunk dictionaries.
-        
+
         """
 
         if not chunks:
@@ -175,7 +175,49 @@ class FaissRetriever:
 
         return results
 
+    def retrieve_evidence(self, query: str, top_k: int = 3) -> List[dict]:
+        """
+        Retrieve the most relevant chunks and return metadata-aware evidence.
 
+        Args:
+            query: User question.
+            top_k: Number of chunks to retrieve.
+
+        Returns:
+            List of dictionaries containing chunk metadata, text, and score.
+        """
+
+        if self.index is None:
+            raise ValueError("FAISS index has not been built yet.")
+
+        if not query.strip():
+            raise ValueError("Query cannot be empty.")
+
+        query_embedding = self.model.encode(
+            [query],
+            convert_to_numpy=True
+        ).astype("float32")
+
+        faiss.normalize_L2(query_embedding)
+
+        scores, indices = self.index.search(query_embedding, top_k)
+
+        valid_indices = []
+        valid_scores = []
+
+        for index, score in zip(indices[0], scores[0]):
+            if index == -1:
+                continue
+
+            valid_indices.append(int(index))
+            valid_scores.append(float(score))
+
+        return format_retrieved_chunks(
+            chunks=self.chunks,
+            indices=valid_indices,
+            scores=valid_scores
+        )
+    
 def print_retrieved_chunks(results: List[Tuple[int, str, float]]) -> None:
     """
     Print retrieved chunks in terminal.
