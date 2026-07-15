@@ -38,6 +38,59 @@ def extract_chunk_texts(chunks):
 
     return texts
 
+def format_retrieved_chunks(chunks, indices, scores=None):
+    """
+    Format retrieved chunks using FAISS result indices.
+
+    Supports both:
+    - old string-based chunks
+    - new metadata-based chunk dictionaries
+
+    Args:
+        chunks (list): Original chunks.
+        indices (list): Retrieved chunk indices.
+        scores (list, optional): Similarity scores/distances.
+
+    Returns:
+        list: Retrieved chunks with text, metadata, and score.
+    """
+
+    retrieved = []
+
+    for position, chunk_index in enumerate(indices):
+        chunk = chunks[int(chunk_index)]
+
+        score = None
+        if scores is not None:
+            score = float(scores[position])
+
+        if isinstance(chunk, dict):
+            item = {
+                "chunk_id": chunk.get("chunk_id"),
+                "source": chunk.get("source"),
+                "page_number": chunk.get("page_number"),
+                "text": chunk.get("text", ""),
+                "score": score,
+            }
+
+        elif isinstance(chunk, str):
+            item = {
+                "chunk_id": f"chunk_{chunk_index}",
+                "source": None,
+                "page_number": None,
+                "text": chunk,
+                "score": score,
+            }
+
+        else:
+            raise TypeError(
+                "Each chunk must be either a string or a dictionary with metadata."
+            )
+
+        retrieved.append(item)
+
+    return retrieved
+
 class FaissRetriever:
     """
     Simple FAISS based retriever using a Hugging Face sentence transformer model.

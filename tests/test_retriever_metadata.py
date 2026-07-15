@@ -34,3 +34,44 @@ def test_extract_chunk_texts_from_metadata_chunks():
         "This is the first metadata chunk.",
         "This is the second metadata chunk.",
     ]
+
+
+from src.retriever import format_retrieved_chunks
+
+
+def test_format_retrieved_chunks_preserves_metadata():
+    chunks = [
+        {
+            "chunk_id": "sample_p1_c0",
+            "source": "sample.pdf",
+            "page_number": 1,
+            "text": "This is the first chunk.",
+        },
+        {
+            "chunk_id": "sample_p2_c0",
+            "source": "sample.pdf",
+            "page_number": 2,
+            "text": "This is the second chunk.",
+        },
+    ]
+
+    indices = [1, 0]
+    scores = [0.91, 0.82]
+
+    retrieved = format_retrieved_chunks(
+        chunks=chunks,
+        indices=indices,
+        scores=scores,
+    )
+
+    assert isinstance(retrieved, list)
+    assert len(retrieved) == 2
+
+    assert retrieved[0]["chunk_id"] == "sample_p2_c0"
+    assert retrieved[0]["source"] == "sample.pdf"
+    assert retrieved[0]["page_number"] == 2
+    assert retrieved[0]["text"] == "This is the second chunk."
+    assert retrieved[0]["score"] == 0.91
+
+    assert retrieved[1]["chunk_id"] == "sample_p1_c0"
+    assert retrieved[1]["score"] == 0.82
