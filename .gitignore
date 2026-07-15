@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment files
+.env
+
+# Outputs and generated files
+outputs/
+*.json
+
+# Model/cache files
+.cache/
+models/
+*.index
+*.faiss
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Data files
+data/*
+!data/sample_document.pdf
+!data/README.md
