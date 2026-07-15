@@ -61,3 +61,50 @@ def clean_text(text: str) -> str:
         cleaned_lines.append(line)
 
     return "\n".join(cleaned_lines)
+
+import fitz
+
+
+def clean_extracted_text(text):
+    """
+    Lightly clean extracted PDF text by removing empty lines
+    and extra spaces.
+    """
+    lines = text.splitlines()
+    cleaned_lines = []
+
+    for line in lines:
+        line = " ".join(line.split())
+
+        if line:
+            cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines)
+
+
+def load_pdf_pages(pdf_path):
+    """
+    Load a PDF and return page-wise extracted text with metadata.
+
+    Args:
+        pdf_path (str): Path to the PDF file.
+
+    Returns:
+        list: List of dictionaries containing page number and text.
+    """
+
+    pages = []
+
+    with fitz.open(pdf_path) as doc:
+        for page_index, page in enumerate(doc):
+            raw_text = page.get_text()
+            cleaned_text = clean_extracted_text(raw_text)
+
+            pages.append(
+                {
+                    "page_number": page_index + 1,
+                    "text": cleaned_text,
+                }
+            )
+
+    return pages
