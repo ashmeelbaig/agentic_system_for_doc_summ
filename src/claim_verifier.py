@@ -56,7 +56,10 @@ class ClaimVerifier:
                     "label": "Unsupported",
                     "score": 0.0,
                     "evidence": "No suitable evidence sentence found.",
-                    "chunk_index": None
+                    "chunk_index": None,
+                    "chunk_id": None,
+                    "source": None,
+                    "page_number": None,
                 }
                 for claim in claims
             ]
@@ -92,23 +95,72 @@ class ClaimVerifier:
                     "label": label,
                     "score": best_score,
                     "evidence": best_evidence["sentence"],
-                    "chunk_index": best_evidence["chunk_index"]
+                    "chunk_index": best_evidence["chunk_index"],
+                    "chunk_id": best_evidence["chunk_id"],
+                    "source": best_evidence["source"],
+                    "page_number": best_evidence["page_number"],
                 }
             )
 
         return results
 
+    def _normalize_retrieved_chunk(self, chunk):
+        """
+        Convert retrieved evidence into a common internal format.
+
+        Supports:
+        - old tuple format: (chunk_index, chunk_text, score)
+        - new metadata dictionary format
+        """
+
+        if isinstance(chunk, dict):
+            return {
+                "chunk_index": chunk.get("chunk_index"),
+                "chunk_id": chunk.get("chunk_id"),
+                "source": chunk.get("source"),
+                "page_number": chunk.get("page_number"),
+                "text": chunk.get("text", ""),
+                "score": float(chunk.get("score", 0.0) or 0.0),
+            }
+
+        if isinstance(chunk, tuple) and len(chunk) == 3:
+            chunk_index, chunk_text, score = chunk
+
+            return {
+                "chunk_index": chunk_index,
+                "chunk_id": f"chunk_{chunk_index}",
+                "source": None,
+                "page_number": None,
+                "text": chunk_text,
+                "score": float(score),
+            }
+
+        raise TypeError(
+            "Retrieved chunk must be either a metadata dictionary or a tuple of "
+            "(chunk_index, chunk_text, score)."
+        )
     def _prepare_evidence_sentences(
         self,
-        retrieved_chunks: List[Tuple[int, str, float]]
+        retrieved_chunks: List
     ) -> List[Dict[str, Any]]:
         """
         Split retrieved chunks into evidence sentences.
+
+        Supports both old tuple-based retrieval results and new metadata-aware evidence.
         """
 
         evidence_items = []
 
-        for chunk_index, chunk_text, retrieval_score in retrieved_chunks:
+        for chunk in retrieved_chunks:
+            normalized_chunk = self._normalize_retrieved_chunk(chunk)
+
+            chunk_index = normalized_chunk["chunk_index"]
+            chunk_id = normalized_chunk["chunk_id"]
+            source = normalized_chunk["source"]
+            page_number = normalized_chunk["page_number"]
+            chunk_text = normalized_chunk["text"]
+            retrieval_score = normalized_chunk["score"]
+
             sentences = re.split(r"(?<=[.!?])\s+", chunk_text)
 
             for sentence in sentences:
@@ -120,8 +172,11 @@ class ClaimVerifier:
                 evidence_items.append(
                     {
                         "chunk_index": chunk_index,
+                        "chunk_id": chunk_id,
+                        "source": source,
+                        "page_number": page_number,
                         "sentence": sentence,
-                        "retrieval_score": retrieval_score
+                        "retrieval_score": retrieval_score,
                     }
                 )
 
