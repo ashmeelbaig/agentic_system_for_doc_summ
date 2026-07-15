@@ -4,6 +4,39 @@ import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+def extract_chunk_texts(chunks):
+    """
+    Extract plain text from chunks.
+
+    Supports both old string-based chunks and new metadata-based chunks.
+
+    Args:
+        chunks (list): List of chunks. Each chunk can be either:
+            - str
+            - dict with a "text" field
+
+    Returns:
+        list: List of chunk text strings.
+    """
+
+    texts = []
+
+    for chunk in chunks:
+        if isinstance(chunk, str):
+            texts.append(chunk)
+
+        elif isinstance(chunk, dict):
+            text = chunk.get("text", "")
+
+            if text:
+                texts.append(text)
+
+        else:
+            raise TypeError(
+                "Each chunk must be either a string or a dictionary with a 'text' field."
+            )
+
+    return texts
 
 class FaissRetriever:
     """
