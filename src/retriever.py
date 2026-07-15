@@ -102,12 +102,10 @@ class FaissRetriever:
         self.index = None
         self.chunks = []
 
-    def build_index(self, chunks: List[str]) -> None:
+    def build_index(self, chunks: List) -> None:
         """
-        Build FAISS index from document chunks.
-
-        Args:
-            chunks: List of text chunks.
+        chunks: List of text chunks or metadata-aware chunk dictionaries.
+        
         """
 
         if not chunks:
@@ -116,8 +114,10 @@ class FaissRetriever:
         self.chunks = chunks
 
         print("\nLoading embedding model and creating embeddings...")
+        chunk_texts = extract_chunk_texts(chunks)
+
         embeddings = self.model.encode(
-            chunks,
+            chunk_texts,
             convert_to_numpy=True,
             show_progress_bar=True
         )

@@ -75,3 +75,59 @@ def test_format_retrieved_chunks_preserves_metadata():
 
     assert retrieved[1]["chunk_id"] == "sample_p1_c0"
     assert retrieved[1]["score"] == 0.82
+
+
+import numpy as np
+
+from src.retriever import FaissRetriever
+
+
+class DummyEmbeddingModel:
+    def __init__(self):
+        self.last_inputs = None
+
+    def encode(self, inputs, convert_to_numpy=True, show_progress_bar=False):
+        self.last_inputs = inputs
+
+        return np.array(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+            ],
+            dtype="float32",
+        )
+
+
+def test_build_index_uses_text_from_metadata_chunks():
+    dummy_model = DummyEmbeddingModel()
+
+    retriever = FaissRetriever.__new__(FaissRetriever)
+    retriever.model_name = "dummy-model"
+    retriever.model = dummy_model
+    retriever.index = None
+    retriever.chunks = []
+
+    chunks = [
+        {
+            "chunk_id": "sample_p1_c0",
+            "source": "sample.pdf",
+            "page_number": 1,
+            "text": "First metadata chunk text.",
+        },
+        {
+            "chunk_id": "sample_p2_c0",
+            "source": "sample.pdf",
+            "page_number": 2,
+            "text": "Second metadata chunk text.",
+        },
+    ]
+
+    retriever.build_index(chunks)
+
+    assert dummy_model.last_inputs == [
+        "First metadata chunk text.",
+        "Second metadata chunk text.",
+    ]
+
+    assert retriever.chunks == chunks
+    assert retriever.index.ntotal == 2
