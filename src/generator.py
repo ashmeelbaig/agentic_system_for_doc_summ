@@ -91,19 +91,66 @@ Answer:
 
         return answer
 
+    def _normalize_retrieved_chunk(self, chunk):
+        """
+        Convert retrieved evidence into a common internal format.
+
+        Supports:
+        - old tuple format: (chunk_index, chunk_text, score)
+        - new metadata dictionary format
+        """
+
+        if isinstance(chunk, dict):
+            return {
+                "chunk_id": chunk.get("chunk_id", "unknown_chunk"),
+                "source": chunk.get("source"),
+                "page_number": chunk.get("page_number"),
+                "text": chunk.get("text", ""),
+                "score": float(chunk.get("score", 0.0) or 0.0),
+            }
+
+        if isinstance(chunk, tuple) and len(chunk) == 3:
+            chunk_index, chunk_text, score = chunk
+
+            return {
+                "chunk_id": chunk_index,
+                "source": None,
+                "page_number": None,
+                "text": chunk_text,
+                "score": float(score),
+            }
+
+        raise TypeError(
+            "Retrieved chunk must be either a metadata dictionary or a tuple of "
+            "(chunk_index, chunk_text, score)."
+        )
+    
     def _build_context(
         self,
-        retrieved_chunks: List[Tuple[int, str, float]],
+        retrieved_chunks: List,
         max_context_words: int
     ) -> str:
         """
         Build context from retrieved chunks.
+
+        Supports both old tuple-based retrieval results and new metadata-aware evidence.
         """
 
         all_text = []
 
-        for chunk_index, chunk_text, score in retrieved_chunks:
-            all_text.append(f"[Chunk {chunk_index}] {chunk_text}")
+        for chunk in retrieved_chunks:
+            normalized_chunk = self._normalize_retrieved_chunk(chunk)
+
+            chunk_id = normalized_chunk["chunk_id"]
+            page_number = normalized_chunk["page_number"]
+            chunk_text = normalized_chunk["text"]
+
+            if page_number is not None:
+                label = f"[Chunk {chunk_id} | Page {page_number}]"
+            else:
+                label = f"[Chunk {chunk_id}]"
+
+            all_text.append(f"{label} {chunk_text}")
 
         combined_text = "\n\n".join(all_text)
         words = combined_text.split()
@@ -144,7 +191,13 @@ Answer:
         query_words = set(self._clean_words(query))
         candidate_sentences = []
 
-        for chunk_index, chunk_text, score in retrieved_chunks:
+        for chunk in retrieved_chunks:
+            normalized_chunk = self._normalize_retrieved_chunk(chunk)
+
+            chunk_id = normalized_chunk["chunk_id"]
+            chunk_text = normalized_chunk["text"]
+            score = normalized_chunk["score"]
+
             sentences = re.split(r"(?<=[.!?])\s+", chunk_text)
 
             for sentence in sentences:
@@ -161,7 +214,7 @@ Answer:
                         "sentence": sentence,
                         "overlap": overlap,
                         "retrieval_score": score,
-                        "chunk_index": chunk_index
+                        "chunk_id": chunk_id
                     }
                 )
 
