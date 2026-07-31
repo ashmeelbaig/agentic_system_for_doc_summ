@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from src.document_collection import prepare_metadata_chunks_from_pdfs
 from src.document_loader import load_pdf_pages
 from src.chunker import chunk_pages_with_metadata
 from src.retriever import FaissRetriever
@@ -100,6 +101,30 @@ def prepare_metadata_chunks_from_pdf(
 
     return pages, chunks, total_chars
 
+def prepare_metadata_chunks_from_selected_pdfs(
+    selected_pdfs,
+    chunk_size: int = 700,
+    overlap: int = 120
+):
+    """
+    Prepare metadata-aware chunks from one or multiple selected PDFs.
+    """
+
+    result = prepare_metadata_chunks_from_pdfs(
+        pdf_paths=selected_pdfs,
+        chunk_size=chunk_size,
+        overlap=overlap,
+    )
+
+    if len(selected_pdfs) == 1:
+        display_name = selected_pdfs[0].name
+    else:
+        display_name = "Multiple PDFs"
+
+    result["display_name"] = display_name
+
+    return result
+
 def main():
     print_header("Claim Grounded Agentic RAG Prototype")
 
@@ -108,14 +133,18 @@ def main():
 
     print("\nProcessing selected PDF. Please wait...")
 
-    pages, chunks, total_chars = prepare_metadata_chunks_from_pdf(
-        pdf_path=selected_pdf,
+    document_result = prepare_metadata_chunks_from_selected_pdfs(
+        selected_pdfs=selected_pdfs,
         chunk_size=700,
-        overlap=120
+        overlap=120,
     )
 
+    chunks = document_result["chunks"]
+    total_chars = document_result["total_chars"]
+    display_name = document_result["display_name"]
+
     print_document_status(
-        pdf_name=selected_pdf.name,
+        pdf_name=display_name,
         total_chars=total_chars,
         total_chunks=len(chunks)
     )
@@ -179,7 +208,7 @@ def main():
 
         saved_file = save_result_to_json(
             output_dir=str(OUTPUT_DIR),
-            pdf_name=selected_pdf.name,
+            pdf_name=display_name,
             query=query,
             answer=answer,
             retrieved_chunks=results,
