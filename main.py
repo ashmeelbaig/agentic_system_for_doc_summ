@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from src.reranker import EvidenceReranker
 from src.document_collection import prepare_metadata_chunks_from_pdfs
 from src.document_loader import load_pdf_pages
 from src.chunker import chunk_pages_with_metadata
@@ -125,6 +126,22 @@ def prepare_metadata_chunks_from_selected_pdfs(
 
     return result
 
+def rerank_candidate_evidence(
+    query: str,
+    candidate_chunks,
+    reranker,
+    top_k: int = 4
+):
+    """
+    Rerank FAISS candidate chunks and return the best evidence chunks.
+    """
+
+    return reranker.rerank(
+        query=query,
+        retrieved_chunks=candidate_chunks,
+        top_k=top_k,
+    )
+
 def main():
     print_header("Claim Grounded Agentic RAG Prototype")
 
@@ -156,8 +173,8 @@ def main():
     print("\nLoading lightweight open source LLM...")
     answer_generator = AnswerGenerator()
 
-    print("\nCreating claim verifier...")
-    claim_verifier = ClaimVerifier(embedding_model=retriever.model)
+    print("\nLoading evidence reranker...")
+    reranker = EvidenceReranker()
 
     print_header("System Ready")
     print("You can now ask questions about the selected document.")
@@ -174,7 +191,14 @@ def main():
             print("Please enter a valid question.")
             continue
 
-        results = retriever.retrieve_evidence(query, top_k=3)
+        candidate_results = retriever.retrieve_evidence(query, top_k=12)
+
+        results = rerank_candidate_evidence(
+            query=query,
+            candidate_chunks=candidate_results,
+            reranker=reranker,
+            top_k=4,
+        )
 
         print_evidence_summary(results)
 
