@@ -1,10 +1,10 @@
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 
 
 def create_baseline_result(
     query: str,
     answer: str,
-    retrieved_chunks: List[Tuple[int, str, float]]
+    retrieved_chunks: List[Any]
 ) -> Dict[str, Any]:
     """
     Create a simple standard RAG baseline result.
