@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from src.document_loader import load_pdf_text
-from src.chunker import chunk_text
+from src.document_loader import load_pdf_pages
+from src.chunker import chunk_pages_with_metadata
 from src.retriever import FaissRetriever
 from src.generator import AnswerGenerator
 from src.claim_extractor import extract_claims
@@ -59,6 +59,27 @@ def choose_pdf_file(pdf_files):
 
         print("Invalid selection. Please enter a valid number.")
 
+def prepare_metadata_chunks_from_pdf(
+    pdf_path: Path,
+    chunk_size: int = 700,
+    overlap: int = 120
+):
+    """
+    Load PDF pages and create metadata-aware chunks.
+    """
+
+    pages = load_pdf_pages(str(pdf_path))
+
+    chunks = chunk_pages_with_metadata(
+        pages=pages,
+        source=pdf_path.name,
+        chunk_size=chunk_size,
+        overlap=overlap
+    )
+
+    total_chars = sum(len(page.get("text", "")) for page in pages)
+
+    return pages, chunks, total_chars
 
 def main():
     print_header("Claim Grounded Agentic RAG Prototype")
@@ -68,17 +89,15 @@ def main():
 
     print("\nProcessing selected PDF. Please wait...")
 
-    extracted_text = load_pdf_text(str(selected_pdf))
-
-    chunks = chunk_text(
-        extracted_text,
+    pages, chunks, total_chars = prepare_metadata_chunks_from_pdf(
+        pdf_path=selected_pdf,
         chunk_size=700,
         overlap=120
     )
 
     print_document_status(
         pdf_name=selected_pdf.name,
-        total_chars=len(extracted_text),
+        total_chars=total_chars,
         total_chunks=len(chunks)
     )
 
@@ -107,7 +126,7 @@ def main():
             print("Please enter a valid question.")
             continue
 
-        results = retriever.retrieve(query, top_k=3)
+        results = retriever.retrieve_evidence(query, top_k=3)
 
         print_evidence_summary(results)
 
