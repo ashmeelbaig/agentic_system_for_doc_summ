@@ -37,6 +37,26 @@ def list_pdf_files(data_dir: Path):
 
     return pdf_files
 
+def get_selected_pdf_paths(pdf_files, choice: str):
+    """
+    Convert terminal PDF selection into selected PDF path list.
+
+    Choice '0' means use all PDFs.
+    Choice '1', '2', etc. means use one selected PDF.
+    """
+
+    if choice == "0":
+        return pdf_files
+
+    if not choice.isdigit():
+        raise ValueError("Invalid PDF selection.")
+
+    selected_index = int(choice)
+
+    if 1 <= selected_index <= len(pdf_files):
+        return [pdf_files[selected_index - 1]]
+
+    raise ValueError("Invalid PDF selection.")
 
 def choose_pdf_file(pdf_files):
     """
