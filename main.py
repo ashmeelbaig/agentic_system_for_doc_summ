@@ -58,26 +58,25 @@ def get_selected_pdf_paths(pdf_files, choice: str):
 
     raise ValueError("Invalid PDF selection.")
 
-def choose_pdf_file(pdf_files):
+def choose_pdf_files(pdf_files):
     """
-    Allow the user to select a PDF file from terminal.
+    Allow the user to select one PDF file or all PDF files from terminal.
     """
 
     print_header("Available PDF Files")
+
+    print("0. Use all PDFs")
 
     for index, pdf_file in enumerate(pdf_files, start=1):
         print(f"{index}. {pdf_file.name}")
 
     while True:
-        choice = input("\nSelect a PDF by number: ")
+        choice = input("\nSelect a PDF by number, or enter 0 for all PDFs: ")
 
-        if choice.isdigit():
-            selected_index = int(choice)
-
-            if 1 <= selected_index <= len(pdf_files):
-                return pdf_files[selected_index - 1]
-
-        print("Invalid selection. Please enter a valid number.")
+        try:
+            return get_selected_pdf_paths(pdf_files, choice)
+        except ValueError:
+            print("Invalid selection. Please enter a valid number.")
 
 def prepare_metadata_chunks_from_pdf(
     pdf_path: Path,
@@ -105,7 +104,7 @@ def main():
     print_header("Claim Grounded Agentic RAG Prototype")
 
     pdf_files = list_pdf_files(DATA_DIR)
-    selected_pdf = choose_pdf_file(pdf_files)
+    selected_pdfs = choose_pdf_files(pdf_files)
 
     print("\nProcessing selected PDF. Please wait...")
 
