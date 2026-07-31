@@ -2,15 +2,50 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Dict, Any, Optional
 
+def normalize_retrieved_evidence_item(item: Any) -> Dict[str, Any]:
+    """
+    Normalize retrieved evidence before saving to JSON.
+
+    Supports:
+    - old tuple format: (chunk_index, chunk_text, score)
+    - new metadata dictionary format
+    """
+
+    if isinstance(item, dict):
+        return {
+            "chunk_index": item.get("chunk_index"),
+            "chunk_id": item.get("chunk_id"),
+            "source": item.get("source"),
+            "page_number": item.get("page_number"),
+            "similarity_score": float(item.get("score", 0.0) or 0.0),
+            "text": item.get("text", ""),
+        }
+
+    if isinstance(item, tuple) and len(item) == 3:
+        chunk_index, chunk_text, score = item
+
+        return {
+            "chunk_index": chunk_index,
+            "chunk_id": None,
+            "source": None,
+            "page_number": None,
+            "similarity_score": float(score),
+            "text": chunk_text,
+        }
+
+    raise TypeError(
+        "Retrieved evidence must be either a metadata dictionary or a tuple of "
+        "(chunk_index, chunk_text, score)."
+    )
 
 def save_result_to_json(
     output_dir: str,
     pdf_name: str,
     query: str,
     answer: str,
-    retrieved_chunks: List[Tuple[int, str, float]],
+    retrieved_chunks: List[Any],
     claims: List[str],
     verification_results: List[Dict[str, Any]],
     score_summary: Dict[str, Any],
@@ -37,16 +72,10 @@ def save_result_to_json(
     file_name = f"result_{timestamp}_{safe_query}.json"
     file_path = output_path / file_name
 
-    retrieved_evidence = []
-
-    for chunk_index, chunk_text, score in retrieved_chunks:
-        retrieved_evidence.append(
-            {
-                "chunk_index": chunk_index,
-                "similarity_score": score,
-                "text": chunk_text
-            }
-        )
+    retrieved_evidence = [
+        normalize_retrieved_evidence_item(item)
+        for item in retrieved_chunks
+    ]
 
     result_data = {
         "pdf_name": pdf_name,

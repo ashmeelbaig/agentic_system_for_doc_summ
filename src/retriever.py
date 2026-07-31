@@ -4,6 +4,92 @@ import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+def extract_chunk_texts(chunks):
+    """
+    Extract plain text from chunks.
+
+    Supports both old string-based chunks and new metadata-based chunks.
+
+    Args:
+        chunks (list): List of chunks. Each chunk can be either:
+            - str
+            - dict with a "text" field
+
+    Returns:
+        list: List of chunk text strings.
+    """
+
+    texts = []
+
+    for chunk in chunks:
+        if isinstance(chunk, str):
+            texts.append(chunk)
+
+        elif isinstance(chunk, dict):
+            text = chunk.get("text", "")
+
+            if text:
+                texts.append(text)
+
+        else:
+            raise TypeError(
+                "Each chunk must be either a string or a dictionary with a 'text' field."
+            )
+
+    return texts
+
+def format_retrieved_chunks(chunks, indices, scores=None):
+    """
+    Format retrieved chunks using FAISS result indices.
+
+    Supports both:
+    - old string-based chunks
+    - new metadata-based chunk dictionaries
+
+    Args:
+        chunks (list): Original chunks.
+        indices (list): Retrieved chunk indices.
+        scores (list, optional): Similarity scores/distances.
+
+    Returns:
+        list: Retrieved chunks with text, metadata, and score.
+    """
+
+    retrieved = []
+
+    for position, chunk_index in enumerate(indices):
+        chunk = chunks[int(chunk_index)]
+
+        score = None
+        if scores is not None:
+            score = float(scores[position])
+
+        if isinstance(chunk, dict):
+            item = {
+                "chunk_id": chunk.get("chunk_id"),
+                "source": chunk.get("source"),
+                "page_number": chunk.get("page_number"),
+                "text": chunk.get("text", ""),
+                "score": score,
+            }
+
+        elif isinstance(chunk, str):
+            item = {
+                "chunk_id": f"chunk_{chunk_index}",
+                "source": None,
+                "page_number": None,
+                "text": chunk,
+                "score": score,
+            }
+
+        else:
+            raise TypeError(
+                "Each chunk must be either a string or a dictionary with metadata."
+            )
+
+        retrieved.append(item)
+
+    return retrieved
 
 class FaissRetriever:
     """
@@ -16,12 +102,10 @@ class FaissRetriever:
         self.index = None
         self.chunks = []
 
-    def build_index(self, chunks: List[str]) -> None:
+    def build_index(self, chunks: List) -> None:
         """
-        Build FAISS index from document chunks.
+        chunks: List of text chunks or metadata-aware chunk dictionaries.
 
-        Args:
-            chunks: List of text chunks.
         """
 
         if not chunks:
@@ -30,8 +114,10 @@ class FaissRetriever:
         self.chunks = chunks
 
         print("\nLoading embedding model and creating embeddings...")
+        chunk_texts = extract_chunk_texts(chunks)
+
         embeddings = self.model.encode(
-            chunks,
+            chunk_texts,
             convert_to_numpy=True,
             show_progress_bar=True
         )
@@ -89,7 +175,49 @@ class FaissRetriever:
 
         return results
 
+    def retrieve_evidence(self, query: str, top_k: int = 3) -> List[dict]:
+        """
+        Retrieve the most relevant chunks and return metadata-aware evidence.
 
+        Args:
+            query: User question.
+            top_k: Number of chunks to retrieve.
+
+        Returns:
+            List of dictionaries containing chunk metadata, text, and score.
+        """
+
+        if self.index is None:
+            raise ValueError("FAISS index has not been built yet.")
+
+        if not query.strip():
+            raise ValueError("Query cannot be empty.")
+
+        query_embedding = self.model.encode(
+            [query],
+            convert_to_numpy=True
+        ).astype("float32")
+
+        faiss.normalize_L2(query_embedding)
+
+        scores, indices = self.index.search(query_embedding, top_k)
+
+        valid_indices = []
+        valid_scores = []
+
+        for index, score in zip(indices[0], scores[0]):
+            if index == -1:
+                continue
+
+            valid_indices.append(int(index))
+            valid_scores.append(float(score))
+
+        return format_retrieved_chunks(
+            chunks=self.chunks,
+            indices=valid_indices,
+            scores=valid_scores
+        )
+    
 def print_retrieved_chunks(results: List[Tuple[int, str, float]]) -> None:
     """
     Print retrieved chunks in terminal.
