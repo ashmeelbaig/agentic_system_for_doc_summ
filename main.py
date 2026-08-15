@@ -1,5 +1,5 @@
 from pathlib import Path
-
+import os
 from src.document_collection import prepare_metadata_chunks_from_pdfs
 from src.document_loader import load_pdf_pages
 from src.chunker import chunk_pages_with_metadata
@@ -125,6 +125,26 @@ def prepare_metadata_chunks_from_selected_pdfs(
 
     return result
 
+def get_generator_model_name():
+    """
+    Select the answer generation model based on GENERATOR_MODE.
+
+    Supported modes:
+    - fast: lightweight local testing
+    - quality: stronger answer generation
+    """
+
+    mode = os.getenv("GENERATOR_MODE", "quality").lower().strip()
+
+    if mode == "fast":
+        return "google/flan-t5-small"
+
+    if mode == "quality":
+        return "google/flan-t5-base"
+
+    print(f"Unknown GENERATOR_MODE='{mode}'. Falling back to quality mode.")
+    return "google/flan-t5-base"
+
 def main():
     print_header("Claim Grounded Agentic RAG Prototype")
 
@@ -153,8 +173,10 @@ def main():
     retriever = FaissRetriever()
     retriever.build_index(chunks)
 
-    print("\nLoading lightweight open source LLM...")
-    answer_generator = AnswerGenerator()
+    generator_model_name = get_generator_model_name()
+
+    print(f"\nLoading answer generation model: {generator_model_name}")
+    answer_generator = AnswerGenerator(model_name=generator_model_name)
 
     print("\nCreating claim verifier...")
     claim_verifier = ClaimVerifier(embedding_model=retriever.model)
