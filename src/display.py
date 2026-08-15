@@ -138,7 +138,30 @@ def print_claim_table(verification_results: List[Dict[str, Any]]) -> None:
         print(f"\nClaim {index}")
         print(f"Claim: {result['claim']}")
         print(f"Label: {result['label']}")
-        print(f"Similarity score: {result['score']:.4f}")
+        print(f"\nClaim {index}")
+        print(f"Claim: {result['claim']}")
+        print(f"Label: {result['label']}")
+
+        if "nli_score" in result:
+            print(f"NLI label: {result.get('nli_label', 'N/A')}")
+            print(f"NLI score: {result['nli_score']:.4f}")
+        elif "score" in result:
+            print(f"Similarity score: {result['score']:.4f}")
+        else:
+            print("Verification score: N/A")
+
+        if result.get("chunk_id"):
+            print(f"Evidence chunk: {result['chunk_id']}")
+        else:
+            print(f"Evidence chunk: {result.get('chunk_index')}")
+
+        if result.get("source"):
+            print(f"Source: {result['source']}")
+
+        if result.get("page_number") is not None:
+            print(f"Page number: {result['page_number']}")
+
+        print(f"Best evidence: {shorten_text(result['evidence'], max_chars=300)}")
         if result.get("chunk_id"):
             print(f"Evidence chunk: {result['chunk_id']}")
         else:
@@ -162,4 +185,9 @@ def print_score_summary(score_summary: Dict[str, Any]) -> None:
     print(f"Supported claims: {score_summary['supported_claims']}")
     print(f"Partially supported claims: {score_summary['partially_supported_claims']}")
     print(f"Unsupported claims: {score_summary['unsupported_claims']}")
+    if "contradicted_claims" in score_summary:
+        print(f"Contradicted claims: {score_summary['contradicted_claims']}")
+
+    if "not_enough_evidence_claims" in score_summary:
+        print(f"Not enough evidence claims: {score_summary['not_enough_evidence_claims']}")
     print(f"Final faithfulness score: {score_summary['faithfulness_score']:.2f}")

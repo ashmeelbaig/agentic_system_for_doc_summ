@@ -3,18 +3,9 @@ from src.scoring import calculate_faithfulness_score
 
 def test_faithfulness_score_supports_nli_labels():
     verification_results = [
-        {
-            "claim": "Claim 1",
-            "label": "Supported",
-        },
-        {
-            "claim": "Claim 2",
-            "label": "Contradicted",
-        },
-        {
-            "claim": "Claim 3",
-            "label": "Not enough evidence",
-        },
+        {"claim": "Claim 1", "label": "Supported"},
+        {"claim": "Claim 2", "label": "Contradicted"},
+        {"claim": "Claim 3", "label": "Not enough evidence"},
     ]
 
     score = calculate_faithfulness_score(verification_results)
@@ -28,18 +19,9 @@ def test_faithfulness_score_supports_nli_labels():
 
 def test_faithfulness_score_still_supports_old_similarity_labels():
     verification_results = [
-        {
-            "claim": "Claim 1",
-            "label": "Supported",
-        },
-        {
-            "claim": "Claim 2",
-            "label": "Partially supported",
-        },
-        {
-            "claim": "Claim 3",
-            "label": "Unsupported",
-        },
+        {"claim": "Claim 1", "label": "Supported"},
+        {"claim": "Claim 2", "label": "Partially supported"},
+        {"claim": "Claim 3", "label": "Unsupported"},
     ]
 
     score = calculate_faithfulness_score(verification_results)

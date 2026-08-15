@@ -37,19 +37,14 @@ def calculate_faithfulness_score(verification_results):
 
         if label == "Supported":
             supported_claims += 1
-
         elif label == "Partially supported":
             partially_supported_claims += 1
-
         elif label == "Unsupported":
             unsupported_claims += 1
-
         elif label == "Contradicted":
             contradicted_claims += 1
-
         elif label == "Not enough evidence":
             not_enough_evidence_claims += 1
-
         else:
             unsupported_claims += 1
 
@@ -64,7 +59,6 @@ def calculate_faithfulness_score(verification_results):
         "not_enough_evidence_claims": not_enough_evidence_claims,
         "faithfulness_score": faithfulness_score,
     }
-
 
 def print_faithfulness_score(score_summary: Dict[str, Any]) -> None:
     """
