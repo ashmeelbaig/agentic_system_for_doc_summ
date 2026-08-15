@@ -1,25 +1,17 @@
-from main import get_generator_model_name
+from main import get_generator_mode
 
 
-def test_get_generator_model_name_fast_mode(monkeypatch):
-    monkeypatch.setenv("GENERATOR_MODE", "fast")
-
-    model_name = get_generator_model_name()
-
-    assert model_name == "google/flan-t5-small"
-
-
-def test_get_generator_model_name_quality_mode(monkeypatch):
-    monkeypatch.setenv("GENERATOR_MODE", "quality")
-
-    model_name = get_generator_model_name()
-
-    assert model_name == "google/flan-t5-base"
-
-
-def test_get_generator_model_name_defaults_to_quality(monkeypatch):
+def test_get_generator_mode_returns_quality_by_default(monkeypatch):
     monkeypatch.delenv("GENERATOR_MODE", raising=False)
 
-    model_name = get_generator_model_name()
+    mode = get_generator_mode()
 
-    assert model_name == "google/flan-t5-base"
+    assert mode == "quality"
+
+
+def test_get_generator_mode_falls_back_to_quality_for_invalid_mode(monkeypatch):
+    monkeypatch.setenv("GENERATOR_MODE", "invalid")
+
+    mode = get_generator_mode()
+
+    assert mode == "quality"

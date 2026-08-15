@@ -125,6 +125,18 @@ def prepare_metadata_chunks_from_selected_pdfs(
 
     return result
 
+def get_generator_mode():
+    """
+    Return selected generator mode.
+    """
+
+    mode = os.getenv("GENERATOR_MODE", "quality").lower().strip()
+
+    if mode in {"fast", "quality"}:
+        return mode
+
+    return "quality"
+
 def get_generator_model_name():
     """
     Select the answer generation model based on GENERATOR_MODE.
@@ -134,15 +146,11 @@ def get_generator_model_name():
     - quality: stronger answer generation
     """
 
-    mode = os.getenv("GENERATOR_MODE", "quality").lower().strip()
+    mode = get_generator_mode()
 
     if mode == "fast":
         return "google/flan-t5-small"
 
-    if mode == "quality":
-        return "google/flan-t5-base"
-
-    print(f"Unknown GENERATOR_MODE='{mode}'. Falling back to quality mode.")
     return "google/flan-t5-base"
 
 def main():
@@ -237,7 +245,11 @@ def main():
             claims=claims,
             verification_results=verification_results,
             score_summary=score_summary,
-            baseline_result=baseline_result
+            baseline_result=baseline_result,
+            generator_metadata={
+                "mode": get_generator_mode(),
+                "model_name": generator_model_name,
+            }
         )
 
         print("\nResult saved successfully.")

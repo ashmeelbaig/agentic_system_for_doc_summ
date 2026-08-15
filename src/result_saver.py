@@ -51,7 +51,8 @@ def save_result_to_json(
     claims: List[str],
     verification_results: List[Dict[str, Any]],
     score_summary: Dict[str, Any],
-    baseline_result: Optional[Dict[str, Any]] = None
+    baseline_result: Optional[Dict[str, Any]] = None,
+    generator_metadata: Optional[Dict[str, Any]] = None
 ) -> Path:
     """
     Save one complete prototype result to a JSON file.
@@ -82,6 +83,7 @@ def save_result_to_json(
     result_data = {
         "pdf_name": pdf_name,
         "query": query,
+        "generator": generator_metadata,
 
         "baseline_rag": baseline_result,
 
