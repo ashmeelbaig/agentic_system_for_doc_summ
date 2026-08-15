@@ -21,6 +21,7 @@ def normalize_retrieved_evidence_item(item: Any) -> Dict[str, Any]:
             "page_number": item.get("page_number"),
             "similarity_score": float(item.get("score", 0.0) or 0.0),
             "text": item.get("text", ""),
+            "rerank_score": item.get("rerank_score"),
         }
 
     if isinstance(item, tuple) and len(item) == 3:
@@ -33,6 +34,7 @@ def normalize_retrieved_evidence_item(item: Any) -> Dict[str, Any]:
             "page_number": None,
             "similarity_score": float(score),
             "text": chunk_text,
+            "rerank_score": None,
         }
 
     raise TypeError(
