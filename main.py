@@ -7,6 +7,7 @@ from src.retriever import FaissRetriever
 from src.generator import AnswerGenerator
 from src.claim_extractor import extract_claims
 from src.claim_verifier import ClaimVerifier
+from src.nli_verifier import NLIClaimVerifier
 from src.scoring import calculate_faithfulness_score
 from src.result_saver import save_result_to_json
 from src.baseline import create_baseline_result, print_baseline_result
@@ -125,6 +126,24 @@ def prepare_metadata_chunks_from_selected_pdfs(
 
     return result
 
+def verify_claims_with_selected_verifier(
+    claims,
+    retrieved_chunks,
+    verifier
+):
+    """
+    Verify claims using the selected verifier.
+
+    This helper allows the main pipeline to use either:
+    - semantic similarity verifier
+    - NLI-based verifier
+    """
+
+    return verifier.verify_claims(
+        claims=claims,
+        retrieved_chunks=retrieved_chunks,
+    )
+
 def main():
     print_header("Claim Grounded Agentic RAG Prototype")
 
@@ -156,8 +175,8 @@ def main():
     print("\nLoading lightweight open source LLM...")
     answer_generator = AnswerGenerator()
 
-    print("\nCreating claim verifier...")
-    claim_verifier = ClaimVerifier(embedding_model=retriever.model)
+    print("\nLoading NLI claim verifier...")
+    claim_verifier = NLIClaimVerifier()
 
     print_header("System Ready")
     print("You can now ask questions about the selected document.")
@@ -195,11 +214,11 @@ def main():
 
         claims = extract_claims(answer)
 
-        verification_results = claim_verifier.verify_claims(
+        verification_results = verify_claims_with_selected_verifier(
             claims=claims,
-            retrieved_chunks=results
+            retrieved_chunks=results,
+            verifier=claim_verifier,
         )
-
         print_claim_table(verification_results)
 
         score_summary = calculate_faithfulness_score(verification_results)
