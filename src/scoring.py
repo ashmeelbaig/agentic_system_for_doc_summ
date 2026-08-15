@@ -1,44 +1,52 @@
 from typing import List, Dict, Any
 
 
-def calculate_faithfulness_score(
-    verification_results: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+def calculate_faithfulness_score(verification_results):
     """
-    Calculate a simple faithfulness score from claim verification results.
+    Calculate faithfulness score from claim verification results.
 
-    Args:
-        verification_results: List of claim verification results.
+    Supports both:
+    - semantic similarity labels:
+      Supported, Partially supported, Unsupported
 
-    Returns:
-        Dictionary containing score summary.
+    - NLI labels:
+      Supported, Contradicted, Not enough evidence
     """
 
-    if not verification_results:
+    total_claims = len(verification_results)
+
+    if total_claims == 0:
         return {
             "total_claims": 0,
             "supported_claims": 0,
             "partially_supported_claims": 0,
             "unsupported_claims": 0,
-            "faithfulness_score": 0.0
+            "contradicted_claims": 0,
+            "not_enough_evidence_claims": 0,
+            "faithfulness_score": 0.0,
         }
 
-    total_claims = len(verification_results)
+    supported_claims = 0
+    partially_supported_claims = 0
+    unsupported_claims = 0
+    contradicted_claims = 0
+    not_enough_evidence_claims = 0
 
-    supported_claims = sum(
-        1 for result in verification_results
-        if result["label"] == "Supported"
-    )
+    for result in verification_results:
+        label = result.get("label", "")
 
-    partially_supported_claims = sum(
-        1 for result in verification_results
-        if result["label"] == "Partially supported"
-    )
-
-    unsupported_claims = sum(
-        1 for result in verification_results
-        if result["label"] == "Unsupported"
-    )
+        if label == "Supported":
+            supported_claims += 1
+        elif label == "Partially supported":
+            partially_supported_claims += 1
+        elif label == "Unsupported":
+            unsupported_claims += 1
+        elif label == "Contradicted":
+            contradicted_claims += 1
+        elif label == "Not enough evidence":
+            not_enough_evidence_claims += 1
+        else:
+            unsupported_claims += 1
 
     faithfulness_score = supported_claims / total_claims
 
@@ -47,9 +55,10 @@ def calculate_faithfulness_score(
         "supported_claims": supported_claims,
         "partially_supported_claims": partially_supported_claims,
         "unsupported_claims": unsupported_claims,
-        "faithfulness_score": faithfulness_score
+        "contradicted_claims": contradicted_claims,
+        "not_enough_evidence_claims": not_enough_evidence_claims,
+        "faithfulness_score": faithfulness_score,
     }
-
 
 def print_faithfulness_score(score_summary: Dict[str, Any]) -> None:
     """
