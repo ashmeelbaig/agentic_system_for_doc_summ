@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Any
 
 import re
 import torch
@@ -29,11 +29,34 @@ class AnswerGenerator:
 
         print(f"Answer generation model loaded successfully on: {self.device}")
 
+    def _build_prompt(self, query: str, context: str) -> str:
+        """
+        Build a grounded QA prompt for technical document answering.
+        """
+
+        return f"""
+You are answering questions about technical documents.
+
+Use only the provided document context.
+Do not use outside knowledge.
+Write a clear, specific answer in 3 to 5 sentences.
+Mention the most relevant source/page information if available.
+If the context is insufficient, say: "The document context does not contain enough information."
+
+Document context:
+{context}
+
+Question:
+{query}
+
+Grounded answer:
+""".strip()
+
     def generate_answer(
         self,
         query: str,
-        retrieved_chunks: List[Tuple[int, str, float]],
-        max_context_words: int = 320
+        retrieved_chunks: List[Any],
+        max_context_words: int = 450
     ) -> str:
         """
         Generate an answer using the query and retrieved evidence.
@@ -45,28 +68,21 @@ class AnswerGenerator:
         if not retrieved_chunks:
             return "No relevant evidence was found in the document."
 
-        context = self._build_context(retrieved_chunks, max_context_words)
+        context = self._build_context(
+            retrieved_chunks=retrieved_chunks,
+            max_context_words=max_context_words
+        )
 
-        prompt = f"""
-Use the document context to answer the question.
-Write the answer in two complete sentences.
-Do not answer with only a heading or title.
-If the context does not contain the answer, say that the document context does not contain enough information.
-
-Context:
-{context}
-
-Question:
-{query}
-
-Answer:
-"""
+        prompt = self._build_prompt(
+            query=query,
+            context=context
+        )
 
         inputs = self.tokenizer(
             prompt,
             return_tensors="pt",
             truncation=True,
-            max_length=512
+            max_length=768
         )
 
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
@@ -74,7 +90,7 @@ Answer:
         with torch.no_grad():
             output_ids = self.model.generate(
                 **inputs,
-                max_new_tokens=120,
+                max_new_tokens=180,
                 do_sample=False,
                 num_beams=4,
                 early_stopping=True
@@ -87,11 +103,14 @@ Answer:
 
         if self._is_weak_answer(answer):
             print("\nLLM answer was too weak. Using extractive fallback answer.")
-            answer = self._generate_extractive_answer(query, retrieved_chunks)
+            answer = self._generate_extractive_answer(
+                query=query,
+                retrieved_chunks=retrieved_chunks
+            )
 
         return answer
 
-    def _normalize_retrieved_chunk(self, chunk):
+    def _normalize_retrieved_chunk(self, chunk: Any) -> dict:
         """
         Convert retrieved evidence into a common internal format.
 
@@ -107,6 +126,7 @@ Answer:
                 "page_number": chunk.get("page_number"),
                 "text": chunk.get("text", ""),
                 "score": float(chunk.get("score", 0.0) or 0.0),
+                "rerank_score": chunk.get("rerank_score"),
             }
 
         if isinstance(chunk, tuple) and len(chunk) == 3:
@@ -118,16 +138,17 @@ Answer:
                 "page_number": None,
                 "text": chunk_text,
                 "score": float(score),
+                "rerank_score": None,
             }
 
         raise TypeError(
             "Retrieved chunk must be either a metadata dictionary or a tuple of "
             "(chunk_index, chunk_text, score)."
         )
-    
+
     def _build_context(
         self,
-        retrieved_chunks: List,
+        retrieved_chunks: List[Any],
         max_context_words: int
     ) -> str:
         """
@@ -142,15 +163,27 @@ Answer:
             normalized_chunk = self._normalize_retrieved_chunk(chunk)
 
             chunk_id = normalized_chunk["chunk_id"]
+            source = normalized_chunk["source"]
             page_number = normalized_chunk["page_number"]
             chunk_text = normalized_chunk["text"]
+            score = normalized_chunk["score"]
+            rerank_score = normalized_chunk["rerank_score"]
 
-            if page_number is not None:
+            if source and page_number is not None:
+                label = f"[Chunk {chunk_id} | Source: {source} | Page {page_number}]"
+            elif page_number is not None:
                 label = f"[Chunk {chunk_id} | Page {page_number}]"
             else:
                 label = f"[Chunk {chunk_id}]"
 
-            all_text.append(f"{label} {chunk_text}")
+            score_text = f"Similarity score: {score:.4f}"
+
+            if rerank_score is not None:
+                score_text += f" | Rerank score: {float(rerank_score):.4f}"
+
+            all_text.append(
+                f"{label}\n{score_text}\n{chunk_text}"
+            )
 
         combined_text = "\n\n".join(all_text)
         words = combined_text.split()
@@ -170,6 +203,18 @@ Answer:
         if len(words) < 8:
             return True
 
+        weak_phrases = [
+            "the document context does not contain enough information",
+            "not enough information",
+            "i don't know",
+            "unknown",
+        ]
+
+        lowered_answer = answer.lower()
+
+        if any(phrase in lowered_answer for phrase in weak_phrases):
+            return False
+
         if answer.count(",") >= 3 and len(words) < 15:
             return True
 
@@ -181,8 +226,8 @@ Answer:
     def _generate_extractive_answer(
         self,
         query: str,
-        retrieved_chunks: List[Tuple[int, str, float]],
-        max_sentences: int = 3
+        retrieved_chunks: List[Any],
+        max_sentences: int = 4
     ) -> str:
         """
         Create a simple answer from the most relevant sentences in retrieved chunks.
@@ -195,8 +240,17 @@ Answer:
             normalized_chunk = self._normalize_retrieved_chunk(chunk)
 
             chunk_id = normalized_chunk["chunk_id"]
+            source = normalized_chunk["source"]
+            page_number = normalized_chunk["page_number"]
             chunk_text = normalized_chunk["text"]
-            score = normalized_chunk["score"]
+            retrieval_score = normalized_chunk["score"]
+            rerank_score = normalized_chunk["rerank_score"]
+
+            final_score = (
+                float(rerank_score)
+                if rerank_score is not None
+                else float(retrieval_score)
+            )
 
             sentences = re.split(r"(?<=[.!?])\s+", chunk_text)
 
@@ -213,8 +267,10 @@ Answer:
                     {
                         "sentence": sentence,
                         "overlap": overlap,
-                        "retrieval_score": score,
-                        "chunk_id": chunk_id
+                        "retrieval_score": final_score,
+                        "chunk_id": chunk_id,
+                        "source": source,
+                        "page_number": page_number,
                     }
                 )
 
@@ -254,7 +310,8 @@ Answer:
         stopwords = {
             "the", "and", "for", "with", "that", "this", "from",
             "what", "which", "are", "was", "were", "has", "have",
-            "main", "document", "about", "into", "using"
+            "main", "document", "about", "into", "using", "how",
+            "does", "can", "will", "shall", "should"
         }
 
         return [word for word in words if word not in stopwords]

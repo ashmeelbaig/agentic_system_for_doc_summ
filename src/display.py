@@ -126,6 +126,10 @@ def print_generated_answer(answer: str) -> None:
 def print_claim_table(verification_results: List[Dict[str, Any]]) -> None:
     """
     Print claim verification results in a clean terminal format.
+
+    Supports both:
+    - semantic similarity verifier results with "score"
+    - NLI verifier results with "nli_score" and "nli_label"
     """
 
     print_header("Claim Verification")
@@ -138,7 +142,15 @@ def print_claim_table(verification_results: List[Dict[str, Any]]) -> None:
         print(f"\nClaim {index}")
         print(f"Claim: {result['claim']}")
         print(f"Label: {result['label']}")
-        print(f"Similarity score: {result['score']:.4f}")
+
+        if "nli_score" in result:
+            print(f"NLI label: {result.get('nli_label', 'N/A')}")
+            print(f"NLI score: {result['nli_score']:.4f}")
+        elif "score" in result:
+            print(f"Similarity score: {result['score']:.4f}")
+        else:
+            print("Verification score: N/A")
+
         if result.get("chunk_id"):
             print(f"Evidence chunk: {result['chunk_id']}")
         else:
@@ -149,6 +161,7 @@ def print_claim_table(verification_results: List[Dict[str, Any]]) -> None:
 
         if result.get("page_number") is not None:
             print(f"Page number: {result['page_number']}")
+
         print(f"Best evidence: {shorten_text(result['evidence'], max_chars=300)}")
 
 
