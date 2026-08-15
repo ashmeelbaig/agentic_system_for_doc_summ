@@ -61,3 +61,45 @@ def test_summarize_result_file_extracts_key_metrics(tmp_path):
     assert summary["contradicted_claims"] == 0
     assert summary["not_enough_evidence_claims"] == 0
     assert summary["faithfulness_score"] == 1.0
+
+import csv
+
+from src.evaluation import save_evaluation_summary_csv
+
+
+def test_save_evaluation_summary_csv_writes_rows(tmp_path):
+    summaries = [
+        {
+            "file_name": "result_1.json",
+            "pdf_name": "sample.pdf",
+            "query": "How does retrieval work?",
+            "generator_mode": "quality",
+            "generator_model": "google/flan-t5-base",
+            "retrieved_evidence_count": 4,
+            "total_claims": 2,
+            "supported_claims": 1,
+            "partially_supported_claims": 0,
+            "unsupported_claims": 0,
+            "contradicted_claims": 0,
+            "not_enough_evidence_claims": 1,
+            "faithfulness_score": 0.5,
+        }
+    ]
+
+    csv_path = tmp_path / "evaluation_summary.csv"
+
+    save_evaluation_summary_csv(
+        summaries=summaries,
+        output_csv_path=csv_path,
+    )
+
+    assert csv_path.exists()
+
+    with open(csv_path, "r", encoding="utf-8", newline="") as file:
+        reader = csv.DictReader(file)
+        rows = list(reader)
+
+    assert len(rows) == 1
+    assert rows[0]["file_name"] == "result_1.json"
+    assert rows[0]["generator_model"] == "google/flan-t5-base"
+    assert rows[0]["faithfulness_score"] == "0.5"
