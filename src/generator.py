@@ -13,7 +13,7 @@ class AnswerGenerator:
     falls back to a simple extractive answer from the retrieved evidence.
     """
 
-    def __init__(self, model_name: str = "google/flan-t5-small"):
+    def __init__(self, model_name: str = "google/flan-t5-base"):
         self.model_name = model_name
 
         print(f"\nLoading answer generation model: {model_name}")
