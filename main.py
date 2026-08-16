@@ -1,12 +1,14 @@
 from pathlib import Path
 import os
+
 from src.document_collection import prepare_metadata_chunks_from_pdfs
 from src.document_loader import load_pdf_pages
 from src.chunker import chunk_pages_with_metadata
 from src.retriever import FaissRetriever
+from src.reranker import EvidenceReranker
 from src.generator import AnswerGenerator
 from src.claim_extractor import extract_claims
-from src.claim_verifier import ClaimVerifier
+from src.nli_verifier import NLIClaimVerifier
 from src.scoring import calculate_faithfulness_score
 from src.result_saver import save_result_to_json
 from src.baseline import create_baseline_result, print_baseline_result
@@ -18,6 +20,7 @@ from src.display import (
     print_claim_table,
     print_score_summary,
 )
+
 
 DATA_DIR = Path("data")
 OUTPUT_DIR = Path("outputs")
@@ -37,6 +40,7 @@ def list_pdf_files(data_dir: Path):
         raise FileNotFoundError("No PDF files found in the data folder.")
 
     return pdf_files
+
 
 def get_selected_pdf_paths(pdf_files, choice: str):
     """
@@ -59,6 +63,7 @@ def get_selected_pdf_paths(pdf_files, choice: str):
 
     raise ValueError("Invalid PDF selection.")
 
+
 def choose_pdf_files(pdf_files):
     """
     Allow the user to select one PDF file or all PDF files from terminal.
@@ -79,10 +84,11 @@ def choose_pdf_files(pdf_files):
         except ValueError:
             print("Invalid selection. Please enter a valid number.")
 
+
 def prepare_metadata_chunks_from_pdf(
     pdf_path: Path,
     chunk_size: int = 700,
-    overlap: int = 120
+    overlap: int = 120,
 ):
     """
     Load PDF pages and create metadata-aware chunks.
@@ -94,17 +100,18 @@ def prepare_metadata_chunks_from_pdf(
         pages=pages,
         source=pdf_path.name,
         chunk_size=chunk_size,
-        overlap=overlap
+        overlap=overlap,
     )
 
     total_chars = sum(len(page.get("text", "")) for page in pages)
 
     return pages, chunks, total_chars
 
+
 def prepare_metadata_chunks_from_selected_pdfs(
     selected_pdfs,
     chunk_size: int = 700,
-    overlap: int = 120
+    overlap: int = 120,
 ):
     """
     Prepare metadata-aware chunks from one or multiple selected PDFs.
@@ -125,9 +132,14 @@ def prepare_metadata_chunks_from_selected_pdfs(
 
     return result
 
+
 def get_generator_mode():
     """
     Return selected generator mode.
+
+    Supported modes:
+    - fast
+    - quality
     """
 
     mode = os.getenv("GENERATOR_MODE", "quality").lower().strip()
@@ -136,6 +148,7 @@ def get_generator_mode():
         return mode
 
     return "quality"
+
 
 def get_generator_model_name():
     """
@@ -152,6 +165,39 @@ def get_generator_model_name():
         return "google/flan-t5-small"
 
     return "google/flan-t5-base"
+
+
+def rerank_candidate_evidence(
+    query: str,
+    candidate_chunks,
+    reranker,
+    top_k: int = 4,
+):
+    """
+    Rerank FAISS candidate evidence and return strongest chunks.
+    """
+
+    return reranker.rerank(
+        query=query,
+        retrieved_chunks=candidate_chunks,
+        top_k=top_k,
+    )
+
+
+def verify_claims_with_selected_verifier(
+    claims,
+    retrieved_chunks,
+    verifier,
+):
+    """
+    Verify claims using the selected verifier.
+    """
+
+    return verifier.verify_claims(
+        claims=claims,
+        retrieved_chunks=retrieved_chunks,
+    )
+
 
 def main():
     print_header("Claim Grounded Agentic RAG Prototype")
@@ -174,20 +220,23 @@ def main():
     print_document_status(
         pdf_name=display_name,
         total_chars=total_chars,
-        total_chunks=len(chunks)
+        total_chunks=len(chunks),
     )
 
     print("\nLoading retrieval model and building FAISS index...")
     retriever = FaissRetriever()
     retriever.build_index(chunks)
 
+    print("\nLoading evidence reranker...")
+    reranker = EvidenceReranker()
+
     generator_model_name = get_generator_model_name()
 
     print(f"\nLoading answer generation model: {generator_model_name}")
     answer_generator = AnswerGenerator(model_name=generator_model_name)
 
-    print("\nCreating claim verifier...")
-    claim_verifier = ClaimVerifier(embedding_model=retriever.model)
+    print("\nLoading NLI claim verifier...")
+    claim_verifier = NLIClaimVerifier()
 
     print_header("System Ready")
     print("You can now ask questions about the selected document.")
@@ -204,19 +253,29 @@ def main():
             print("Please enter a valid question.")
             continue
 
-        results = retriever.retrieve_evidence(query, top_k=3)
+        candidate_results = retriever.retrieve_evidence(
+            query=query,
+            top_k=12,
+        )
+
+        results = rerank_candidate_evidence(
+            query=query,
+            candidate_chunks=candidate_results,
+            reranker=reranker,
+            top_k=4,
+        )
 
         print_evidence_summary(results)
 
         answer = answer_generator.generate_answer(
             query=query,
-            retrieved_chunks=results
+            retrieved_chunks=results,
         )
 
         baseline_result = create_baseline_result(
             query=query,
             answer=answer,
-            retrieved_chunks=results
+            retrieved_chunks=results,
         )
 
         print_baseline_result(baseline_result)
@@ -225,9 +284,10 @@ def main():
 
         claims = extract_claims(answer)
 
-        verification_results = claim_verifier.verify_claims(
+        verification_results = verify_claims_with_selected_verifier(
             claims=claims,
-            retrieved_chunks=results
+            retrieved_chunks=results,
+            verifier=claim_verifier,
         )
 
         print_claim_table(verification_results)
@@ -249,7 +309,7 @@ def main():
             generator_metadata={
                 "mode": get_generator_mode(),
                 "model_name": generator_model_name,
-            }
+            },
         )
 
         print("\nResult saved successfully.")

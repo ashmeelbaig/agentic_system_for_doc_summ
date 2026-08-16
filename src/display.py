@@ -26,12 +26,13 @@ def shorten_text(text: str, max_chars: int = 350) -> str:
     Shorten long text for terminal display.
     """
 
-    text = " ".join(text.split())
+    text = " ".join(str(text).split())
 
     if len(text) <= max_chars:
         return text
 
     return text[:max_chars] + "..."
+
 
 def normalize_evidence_item(item: Any) -> Dict[str, Any]:
     """
@@ -39,17 +40,22 @@ def normalize_evidence_item(item: Any) -> Dict[str, Any]:
 
     Supports:
     - old tuple format: (chunk_index, chunk_text, score)
-    - new metadata dictionary format
+    - metadata dictionary format
+    - reranked metadata dictionary format
     """
 
     if isinstance(item, dict):
+        similarity_score = item.get("similarity_score", item.get("score", 0.0))
+
         return {
             "chunk_index": item.get("chunk_index"),
             "chunk_id": item.get("chunk_id"),
             "source": item.get("source"),
             "page_number": item.get("page_number"),
             "text": item.get("text", ""),
-            "score": float(item.get("score", 0.0) or 0.0),
+            "similarity_score": float(similarity_score or 0.0),
+            "rerank_score": item.get("rerank_score"),
+            "original_rank": item.get("original_rank"),
         }
 
     if isinstance(item, tuple) and len(item) == 3:
@@ -61,7 +67,9 @@ def normalize_evidence_item(item: Any) -> Dict[str, Any]:
             "source": None,
             "page_number": None,
             "text": chunk_text,
-            "score": float(score),
+            "similarity_score": float(score),
+            "rerank_score": None,
+            "original_rank": None,
         }
 
     raise TypeError(
@@ -83,9 +91,12 @@ def print_document_status(pdf_name: str, total_chars: int, total_chunks: int) ->
 
 def print_evidence_summary(results: List[Any]) -> None:
     """
-    Print short retrieved evidence summary.
+    Print retrieved evidence summary.
 
-    Supports both old tuple-based evidence and new metadata-aware evidence.
+    Supports:
+    - old tuple-based evidence
+    - metadata-aware evidence
+    - reranked evidence
     """
 
     print_header("Retrieved Evidence")
@@ -110,7 +121,14 @@ def print_evidence_summary(results: List[Any]) -> None:
         if evidence["page_number"] is not None:
             print(f"Page number: {evidence['page_number']}")
 
-        print(f"Similarity score: {evidence['score']:.4f}")
+        if evidence["original_rank"] is not None:
+            print(f"Original FAISS rank: {evidence['original_rank']}")
+
+        print(f"Similarity score: {evidence['similarity_score']:.4f}")
+
+        if evidence["rerank_score"] is not None:
+            print(f"Rerank score: {float(evidence['rerank_score']):.4f}")
+
         print(f"Preview: {shorten_text(evidence['text'], max_chars=400)}")
 
 
@@ -125,9 +143,9 @@ def print_generated_answer(answer: str) -> None:
 
 def print_claim_table(verification_results: List[Dict[str, Any]]) -> None:
     """
-    Print claim verification results in a clean terminal format.
+    Print claim verification results.
 
-    Supports both:
+    Supports:
     - semantic similarity verifier results with "score"
     - NLI verifier results with "nli_score" and "nli_label"
     """
@@ -140,21 +158,23 @@ def print_claim_table(verification_results: List[Dict[str, Any]]) -> None:
 
     for index, result in enumerate(verification_results, start=1):
         print(f"\nClaim {index}")
-        print(f"Claim: {result['claim']}")
-        print(f"Label: {result['label']}")
+        print(f"Claim: {result.get('claim')}")
+        print(f"Label: {result.get('label')}")
 
         if "nli_score" in result:
             print(f"NLI label: {result.get('nli_label', 'N/A')}")
-            print(f"NLI score: {result['nli_score']:.4f}")
+            print(f"NLI score: {float(result.get('nli_score', 0.0)):.4f}")
         elif "score" in result:
-            print(f"Similarity score: {result['score']:.4f}")
+            print(f"Similarity score: {float(result.get('score', 0.0)):.4f}")
         else:
             print("Verification score: N/A")
 
         if result.get("chunk_id"):
             print(f"Evidence chunk: {result['chunk_id']}")
-        else:
+        elif result.get("chunk_index") is not None:
             print(f"Evidence chunk: {result.get('chunk_index')}")
+        else:
+            print("Evidence chunk: N/A")
 
         if result.get("source"):
             print(f"Source: {result['source']}")
@@ -162,7 +182,10 @@ def print_claim_table(verification_results: List[Dict[str, Any]]) -> None:
         if result.get("page_number") is not None:
             print(f"Page number: {result['page_number']}")
 
-        print(f"Best evidence: {shorten_text(result['evidence'], max_chars=300)}")
+        print(
+            "Best evidence: "
+            f"{shorten_text(result.get('evidence', ''), max_chars=300)}"
+        )
 
 
 def print_score_summary(score_summary: Dict[str, Any]) -> None:
@@ -171,8 +194,25 @@ def print_score_summary(score_summary: Dict[str, Any]) -> None:
     """
 
     print_header("Faithfulness Score")
-    print(f"Total claims: {score_summary['total_claims']}")
-    print(f"Supported claims: {score_summary['supported_claims']}")
-    print(f"Partially supported claims: {score_summary['partially_supported_claims']}")
-    print(f"Unsupported claims: {score_summary['unsupported_claims']}")
-    print(f"Final faithfulness score: {score_summary['faithfulness_score']:.2f}")
+
+    print(f"Total claims: {score_summary.get('total_claims', 0)}")
+    print(f"Supported claims: {score_summary.get('supported_claims', 0)}")
+    print(
+        "Partially supported claims: "
+        f"{score_summary.get('partially_supported_claims', 0)}"
+    )
+    print(f"Unsupported claims: {score_summary.get('unsupported_claims', 0)}")
+
+    if "contradicted_claims" in score_summary:
+        print(f"Contradicted claims: {score_summary['contradicted_claims']}")
+
+    if "not_enough_evidence_claims" in score_summary:
+        print(
+            "Not enough evidence claims: "
+            f"{score_summary['not_enough_evidence_claims']}"
+        )
+
+    print(
+        "Final faithfulness score: "
+        f"{float(score_summary.get('faithfulness_score', 0.0)):.2f}"
+    )
