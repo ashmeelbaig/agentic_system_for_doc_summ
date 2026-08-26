@@ -80,3 +80,21 @@ def test_final_safety_gate_refuses_unsafe_answer(verification, score):
 
     assert decision.is_safe is False
     assert decision.action == "refuse"
+
+
+def test_final_safety_gate_refuses_not_enough_evidence():
+    verification = [{"claim": FOCUSED_ANSWER, "label": "not enough evidence"}]
+
+    decision = final_safety_gate(QUERY, FOCUSED_ANSWER, verification, GOOD_SCORE)
+
+    assert decision.is_safe is False
+    assert decision.action == "refuse"
+
+
+def test_final_safety_gate_refuses_weak_focus_answer():
+    unfocused_answer = "Volcanoes release molten rock during an eruption event."
+
+    decision = final_safety_gate(QUERY, unfocused_answer, SUPPORTED, GOOD_SCORE)
+
+    assert decision.is_safe is False
+    assert decision.action == "refuse"

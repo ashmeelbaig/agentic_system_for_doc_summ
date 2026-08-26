@@ -2,7 +2,11 @@ from pathlib import Path
 import os
 
 from src.retrieval_retry import retrieve_with_retries, confidence_to_dict
-from src.answer_revision_agent import decide_answer_revision, build_revision_query
+from src.answer_revision_agent import (
+    build_revision_query,
+    decide_answer_revision,
+    final_safety_gate,
+)
 from src.document_collection import prepare_metadata_chunks_from_pdfs
 from src.document_loader import load_pdf_pages
 from src.chunker import chunk_pages_with_metadata
@@ -346,7 +350,20 @@ def main():
                     "Retrieval confidence remained low after three attempts."
                 )
                 baseline_result["draft_answer"] = answer
+                baseline_result["candidate_final_answer"] = answer
                 baseline_result["final_answer"] = answer
+                baseline_result["final_safety_gate"] = {
+                    "is_safe": False,
+                    "reason": "Retrieval confidence remained low after three attempts.",
+                    "action": "refuse",
+                }
+                baseline_result["final_verification_summary"] = {
+                    "total_claims": 0,
+                    "supported_claims": 0,
+                    "contradicted_claims": 0,
+                    "not_enough_evidence_claims": 0,
+                    "faithfulness_score": 0.0,
+                }
                 baseline_result["revision_decision"] = {
                     "decision": "refuse",
                     "reason": "Retrieval confidence remained low after three attempts.",
@@ -493,11 +510,41 @@ def main():
             final_score_summary = revised_score_summary
 
         # ---------------------------------------------------------
-        # 9. Add revision metadata
+        # 9. Final safety gate
+        # ---------------------------------------------------------
+        candidate_final_answer = final_answer
+        final_safety_decision = final_safety_gate(
+            query=query,
+            final_answer=candidate_final_answer,
+            final_verification_results=final_verification_results,
+            final_score_summary=final_score_summary,
+        )
+
+        print("\nFinal Safety Gate")
+        print("-----------------")
+        print(f"Action: {final_safety_decision.action}")
+        print(f"Reason: {final_safety_decision.reason}")
+
+        if not final_safety_decision.is_safe:
+            final_answer = (
+                "The retrieved documents do not provide enough reliable evidence "
+                "to answer this question."
+            )
+            print_generated_answer(final_answer)
+
+        # ---------------------------------------------------------
+        # 10. Add revision and final safety metadata
         # ---------------------------------------------------------
         if isinstance(baseline_result, dict):
             baseline_result["draft_answer"] = draft_answer
+            baseline_result["candidate_final_answer"] = candidate_final_answer
             baseline_result["final_answer"] = final_answer
+            baseline_result["final_safety_gate"] = {
+                "is_safe": final_safety_decision.is_safe,
+                "reason": final_safety_decision.reason,
+                "action": final_safety_decision.action,
+            }
+            baseline_result["is_refused"] = not final_safety_decision.is_safe
 
             baseline_result["revision_decision"] = {
                 "decision": revision_decision.decision,
@@ -522,7 +569,7 @@ def main():
             }
 
         # ---------------------------------------------------------
-        # 10. Save final result
+        # 11. Save final result
         # ---------------------------------------------------------
         saved_file = save_result_to_json(
             output_dir=str(OUTPUT_DIR),
