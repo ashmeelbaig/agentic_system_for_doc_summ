@@ -1,6 +1,8 @@
 from pathlib import Path
 import os
 
+from src.retrieval_retry import retrieve_with_retries, confidence_to_dict
+from src.answer_revision_agent import decide_answer_revision, build_revision_query
 from src.document_collection import prepare_metadata_chunks_from_pdfs
 from src.document_loader import load_pdf_pages
 from src.chunker import chunk_pages_with_metadata
@@ -199,6 +201,43 @@ def verify_claims_with_selected_verifier(
     )
 
 
+def make_empty_score_summary():
+    """
+    Score summary used when the system refuses before generation.
+    """
+
+    return {
+        "total_claims": 0,
+        "supported_claims": 0,
+        "partially_supported_claims": 0,
+        "unsupported_claims": 0,
+        "contradicted_claims": 0,
+        "not_enough_evidence_claims": 0,
+        "faithfulness_score": 0.0,
+    }
+
+
+def print_retrieval_attempts(attempts):
+    """
+    Print retrieval retry attempt details.
+    """
+
+    print("\nRetrieval Attempts")
+    print("------------------")
+
+    for attempt in attempts:
+        confidence = attempt["confidence"]
+
+        print(f"Attempt {attempt['attempt']}:")
+        print(f"Query: {attempt['query']}")
+        print(f"Confidence label: {confidence['label']}")
+        print(f"Reason: {confidence['reason']}")
+        print(f"Top rerank score: {confidence['top_rerank_score']:.4f}")
+        print(f"Average rerank score: {confidence['avg_rerank_score']:.4f}")
+        print(f"Keyword coverage: {confidence['keyword_coverage']:.4f}")
+        print("")
+
+
 def main():
     print_header("Claim Grounded Agentic RAG Prototype")
 
@@ -243,30 +282,112 @@ def main():
     print("Type 'exit' to stop the prototype.")
 
     while True:
-        query = input("\nAsk a question: ")
+        query = input("\nAsk a question: ").strip()
 
-        if query.lower().strip() == "exit":
+        if query.lower() == "exit":
             print("\nExiting prototype.")
             break
 
-        if not query.strip():
+        if not query:
             print("Please enter a valid question.")
             continue
 
-        candidate_results = retriever.retrieve_evidence(
-            query=query,
-            top_k=12,
-        )
-
-        results = rerank_candidate_evidence(
-            query=query,
-            candidate_chunks=candidate_results,
+        # ---------------------------------------------------------
+        # 1. Retrieval guardrail with three attempts
+        # Attempt 1: original query
+        # Attempt 2: rewritten query
+        # Attempt 3: keyword query
+        # ---------------------------------------------------------
+        retrieval_result = retrieve_with_retries(
+            original_query=query,
+            retriever=retriever,
             reranker=reranker,
-            top_k=4,
+            rerank_function=rerank_candidate_evidence,
+            max_attempts=3,
+            retrieve_top_k=12,
+            rerank_top_k=4,
         )
 
+        results = retrieval_result["results"]
+        retrieval_confidence = retrieval_result["confidence"]
+        retrieval_confidence_dict = confidence_to_dict(retrieval_confidence)
+        retrieval_attempts = retrieval_result["attempts"]
+        used_query = retrieval_result["used_query"]
+
+        print_retrieval_attempts(retrieval_attempts)
+
+        print("\nSelected Evidence After Retrieval Guardrail")
+        print("------------------------------------------")
+        print(f"Used query: {used_query}")
+        print(f"Final retrieval confidence: {retrieval_confidence.label}")
         print_evidence_summary(results)
 
+        # ---------------------------------------------------------
+        # 2. Refuse before generation if retrieval is still weak
+        # ---------------------------------------------------------
+        if not retrieval_result["should_answer"]:
+            answer = (
+                "The retrieved documents do not provide enough reliable evidence "
+                "to answer this question."
+            )
+
+            baseline_result = create_baseline_result(
+                query=query,
+                answer=answer,
+                retrieved_chunks=results,
+            )
+
+            if isinstance(baseline_result, dict):
+                baseline_result["retrieval_confidence"] = retrieval_confidence_dict
+                baseline_result["retrieval_attempts"] = retrieval_attempts
+                baseline_result["used_query"] = used_query
+                baseline_result["is_refused"] = True
+                baseline_result["refusal_reason"] = (
+                    "Retrieval confidence remained low after three attempts."
+                )
+                baseline_result["draft_answer"] = answer
+                baseline_result["final_answer"] = answer
+                baseline_result["revision_decision"] = {
+                    "decision": "refuse",
+                    "reason": "Retrieval confidence remained low after three attempts.",
+                    "instruction": "No answer was generated because evidence was not strong enough.",
+                    "answer_focus": "not_applicable",
+                    "should_reverify": False,
+                }
+
+            print_baseline_result(baseline_result)
+            print_generated_answer(answer)
+
+            claims = []
+            verification_results = []
+            score_summary = make_empty_score_summary()
+
+            print_score_summary(score_summary)
+
+            saved_file = save_result_to_json(
+                output_dir=str(OUTPUT_DIR),
+                pdf_name=display_name,
+                query=query,
+                answer=answer,
+                retrieved_chunks=results,
+                claims=claims,
+                verification_results=verification_results,
+                score_summary=score_summary,
+                baseline_result=baseline_result,
+                generator_metadata={
+                    "mode": get_generator_mode(),
+                    "model_name": generator_model_name,
+                },
+            )
+
+            print("\nResult saved successfully.")
+            print(f"Saved file: {saved_file}")
+
+            continue
+
+        # ---------------------------------------------------------
+        # 3. Generate draft answer
+        # ---------------------------------------------------------
         answer = answer_generator.generate_answer(
             query=query,
             retrieved_chunks=results,
@@ -278,12 +399,23 @@ def main():
             retrieved_chunks=results,
         )
 
-        print_baseline_result(baseline_result)
+        if isinstance(baseline_result, dict):
+            baseline_result["retrieval_confidence"] = retrieval_confidence_dict
+            baseline_result["retrieval_attempts"] = retrieval_attempts
+            baseline_result["used_query"] = used_query
+            baseline_result["is_refused"] = False
 
+        print_baseline_result(baseline_result)
         print_generated_answer(answer)
 
+        # ---------------------------------------------------------
+        # 4. Extract claims
+        # ---------------------------------------------------------
         claims = extract_claims(answer)
 
+        # ---------------------------------------------------------
+        # 5. Verify draft claims with NLI
+        # ---------------------------------------------------------
         verification_results = verify_claims_with_selected_verifier(
             claims=claims,
             retrieved_chunks=results,
@@ -292,19 +424,115 @@ def main():
 
         print_claim_table(verification_results)
 
+        # ---------------------------------------------------------
+        # 6. Calculate draft faithfulness score
+        # ---------------------------------------------------------
         score_summary = calculate_faithfulness_score(verification_results)
 
         print_score_summary(score_summary)
 
+        # ---------------------------------------------------------
+        # 7. Answer Revision Agent V1
+        # ---------------------------------------------------------
+        revision_decision = decide_answer_revision(
+            query=query,
+            answer=answer,
+            verification_results=verification_results,
+            score_summary=score_summary,
+        )
+
+        print("\nAnswer Revision Decision")
+        print("------------------------")
+        print(f"Decision: {revision_decision.decision}")
+        print(f"Reason: {revision_decision.reason}")
+        print(f"Answer focus: {revision_decision.answer_focus}")
+
+        draft_answer = answer
+        final_answer = answer
+        final_claims = claims
+        final_verification_results = verification_results
+        final_score_summary = score_summary
+
+        # ---------------------------------------------------------
+        # 8. One revision attempt for efficiency
+        # ---------------------------------------------------------
+        if revision_decision.decision == "revise":
+            print("\nRevising answer once using revision instructions...")
+
+            revision_query = build_revision_query(
+                original_query=query,
+                instruction=revision_decision.instruction,
+            )
+
+            revised_answer = answer_generator.generate_answer(
+                query=revision_query,
+                retrieved_chunks=results,
+            )
+
+            print_generated_answer(revised_answer)
+
+            revised_claims = extract_claims(revised_answer)
+
+            revised_verification_results = verify_claims_with_selected_verifier(
+                claims=revised_claims,
+                retrieved_chunks=results,
+                verifier=claim_verifier,
+            )
+
+            print_claim_table(revised_verification_results)
+
+            revised_score_summary = calculate_faithfulness_score(
+                revised_verification_results
+            )
+
+            print_score_summary(revised_score_summary)
+
+            final_answer = revised_answer
+            final_claims = revised_claims
+            final_verification_results = revised_verification_results
+            final_score_summary = revised_score_summary
+
+        # ---------------------------------------------------------
+        # 9. Add revision metadata
+        # ---------------------------------------------------------
+        if isinstance(baseline_result, dict):
+            baseline_result["draft_answer"] = draft_answer
+            baseline_result["final_answer"] = final_answer
+
+            baseline_result["revision_decision"] = {
+                "decision": revision_decision.decision,
+                "reason": revision_decision.reason,
+                "instruction": revision_decision.instruction,
+                "answer_focus": revision_decision.answer_focus,
+                "should_reverify": revision_decision.should_reverify,
+            }
+
+            baseline_result["final_verification_summary"] = {
+                "total_claims": final_score_summary.get("total_claims", 0),
+                "supported_claims": final_score_summary.get("supported_claims", 0),
+                "contradicted_claims": final_score_summary.get(
+                    "contradicted_claims", 0
+                ),
+                "not_enough_evidence_claims": final_score_summary.get(
+                    "not_enough_evidence_claims", 0
+                ),
+                "faithfulness_score": final_score_summary.get(
+                    "faithfulness_score", 0.0
+                ),
+            }
+
+        # ---------------------------------------------------------
+        # 10. Save final result
+        # ---------------------------------------------------------
         saved_file = save_result_to_json(
             output_dir=str(OUTPUT_DIR),
             pdf_name=display_name,
             query=query,
-            answer=answer,
+            answer=final_answer,
             retrieved_chunks=results,
-            claims=claims,
-            verification_results=verification_results,
-            score_summary=score_summary,
+            claims=final_claims,
+            verification_results=final_verification_results,
+            score_summary=final_score_summary,
             baseline_result=baseline_result,
             generator_metadata={
                 "mode": get_generator_mode(),
