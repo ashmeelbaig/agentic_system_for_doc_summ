@@ -2,6 +2,11 @@ from pathlib import Path
 import os
 
 from src.retrieval_retry import retrieve_with_retries, confidence_to_dict
+from src.safety_guardrails import (
+    check_user_query_safety,
+    detect_prompt_injection,
+    sanitize_evidence_text,
+)
 from src.answer_revision_agent import (
     build_revision_query,
     decide_answer_revision,
@@ -296,6 +301,39 @@ def main():
             print("Please enter a valid question.")
             continue
 
+        query_safety = check_user_query_safety(query)
+
+        if not query_safety["is_safe"]:
+            answer = (
+                "I cannot help with this request because it asks for unsafe or "
+                "non-document behaviour."
+            )
+            score_summary = make_empty_score_summary()
+            baseline_result = create_baseline_result(query, answer, [])
+            baseline_result["safety_guardrail"] = query_safety
+            baseline_result["is_refused"] = True
+            baseline_result["refusal_reason"] = query_safety["reason"]
+
+            print_generated_answer(answer)
+            saved_file = save_result_to_json(
+                output_dir=str(OUTPUT_DIR),
+                pdf_name=display_name,
+                query=query,
+                answer=answer,
+                retrieved_chunks=[],
+                claims=[],
+                verification_results=[],
+                score_summary=score_summary,
+                baseline_result=baseline_result,
+                generator_metadata={
+                    "mode": get_generator_mode(),
+                    "model_name": generator_model_name,
+                },
+            )
+            print("\nResult saved successfully.")
+            print(f"Saved file: {saved_file}")
+            continue
+
         # ---------------------------------------------------------
         # 1. Retrieval guardrail with three attempts
         # Attempt 1: original query
@@ -317,6 +355,35 @@ def main():
         retrieval_confidence_dict = confidence_to_dict(retrieval_confidence)
         retrieval_attempts = retrieval_result["attempts"]
         used_query = retrieval_result["used_query"]
+
+        prompt_injection_matches = []
+        sanitized_results = []
+
+        for chunk in results:
+            if isinstance(chunk, dict):
+                chunk_text = str(chunk.get("text", ""))
+                sanitized_chunk = dict(chunk)
+                sanitized_chunk["text"] = sanitize_evidence_text(chunk_text)
+            elif isinstance(chunk, tuple) and len(chunk) == 3:
+                chunk_index, chunk_text, score = chunk
+                chunk_text = str(chunk_text)
+                sanitized_chunk = (
+                    chunk_index,
+                    sanitize_evidence_text(chunk_text),
+                    score,
+                )
+            else:
+                chunk_text = ""
+                sanitized_chunk = chunk
+
+            detection = detect_prompt_injection(chunk_text)
+            for pattern in detection["matched_patterns"]:
+                if pattern not in prompt_injection_matches:
+                    prompt_injection_matches.append(pattern)
+
+            sanitized_results.append(sanitized_chunk)
+
+        results = sanitized_results
 
         print_retrieval_attempts(retrieval_attempts)
 
@@ -346,6 +413,10 @@ def main():
                 baseline_result["retrieval_attempts"] = retrieval_attempts
                 baseline_result["used_query"] = used_query
                 baseline_result["is_refused"] = True
+                baseline_result["document_prompt_injection_detected"] = bool(
+                    prompt_injection_matches
+                )
+                baseline_result["prompt_injection_matches"] = prompt_injection_matches
                 baseline_result["refusal_reason"] = (
                     "Retrieval confidence remained low after three attempts."
                 )
@@ -421,6 +492,10 @@ def main():
             baseline_result["retrieval_attempts"] = retrieval_attempts
             baseline_result["used_query"] = used_query
             baseline_result["is_refused"] = False
+            baseline_result["document_prompt_injection_detected"] = bool(
+                prompt_injection_matches
+            )
+            baseline_result["prompt_injection_matches"] = prompt_injection_matches
 
         print_baseline_result(baseline_result)
         print_generated_answer(answer)
