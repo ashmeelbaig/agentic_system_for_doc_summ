@@ -85,5 +85,8 @@ def get_generator(
 
         return LocalTransformersGenerator(model_id=model_id)
     if provider_type == "hosted_hf":
-        return HuggingFaceAPIGenerator(model_id=model_id)
+        return HuggingFaceAPIGenerator(
+            model_id=model_id,
+            provider=os.getenv("HF_PROVIDER", "auto").strip() or "auto",
+        )
     raise ValueError("Unsupported generator provider type.")

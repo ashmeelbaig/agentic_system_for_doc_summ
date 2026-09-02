@@ -24,6 +24,9 @@ outputs/
 models/
 huggingface_cache/
 outputs/*.tmp
+outputs/ui_uploads/
+outputs/streamlit_uploads/
+tmp_uploads/
 *.index
 *.faiss
 

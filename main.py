@@ -33,8 +33,7 @@ from src.result_saver import (
     save_multi_model_result_to_json,
     save_result_to_json,
 )
-from src.generators.factory import get_all_configured_models, get_configured_model_ids
-from src.generators.multi_model_runner import run_all_generators
+from src.pipeline import run_models_for_evidence
 from src.baseline import create_baseline_result, print_baseline_result
 from src.display import (
     print_header,
@@ -518,28 +517,18 @@ def main():
         # Multi-model HF API path. Retrieval and reranking above are shared.
         # ---------------------------------------------------------
         if generator_mode in {"multi_hf", "multi_model"}:
-            if generator_mode == "multi_model":
-                model_ids = get_all_configured_models()
-                if not any(
-                    item["provider_type"] == "local_transformers"
-                    for item in model_ids
-                ):
-                    print(
-                        "No local models configured. "
-                        "Skipping local Transformers generation."
-                    )
-            else:
-                model_ids = get_configured_model_ids()
-            multi_result = run_all_generators(
+            multi_result = run_models_for_evidence(
                 query=query,
                 evidence_chunks=results,
-                model_ids=model_ids,
-                claim_extractor=extract_claims,
                 claim_verifier=claim_verifier,
-                revision_function=decide_answer_revision,
-                final_safety_gate=final_safety_gate,
                 retrieval_confidence=retrieval_confidence_dict,
+                generator_mode=generator_mode,
             )
+            if multi_result.get("local_models_skipped"):
+                print(
+                    "No local models configured. "
+                    "Skipping local Transformers generation."
+                )
             print_model_comparison(multi_result["model_results"])
 
             retrieval_output = {
