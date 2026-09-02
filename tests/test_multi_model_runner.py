@@ -42,6 +42,16 @@ class FakeGenerator:
         return value
 
 
+class ReleasableFakeGenerator(FakeGenerator):
+    def __init__(self, model_id, provider, answers, seen, released):
+        super().__init__(model_id, answers, seen)
+        self.provider = provider
+        self.released = released
+
+    def release(self):
+        self.released.append(self.model_id)
+
+
 class FakeVerifier:
     def __init__(self):
         self.calls = 0
@@ -96,6 +106,56 @@ def test_one_model_failure_does_not_stop_other_models():
     assert result["model_results"]["bad"]["attempt_failures"] == []
     assert result["model_results"]["good"]["status"] == "success"
     assert result["model_results"]["good"]["attempted_methods"] == ["text_generation"]
+
+
+def test_one_weak_model_failure_does_not_stop_the_other():
+    qwen = "Qwen/Qwen2.5-0.5B-Instruct"
+    tinyllama = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    seen = []
+    answers = {qwen: [RuntimeError("provider unavailable")], tinyllama: ["Answer."]}
+    factory = lambda model: FakeGenerator(model, answers[model], seen)
+
+    result = run_all_generators(
+        "Question", EVIDENCE, [qwen, tinyllama], claims, FakeVerifier(), keep, safe,
+        {"label": "high"}, factory,
+    )
+
+    assert result["model_results"][qwen]["status"] == "failed"
+    assert result["model_results"][tinyllama]["status"] == "success"
+
+
+def test_four_hosted_and_local_models_have_separate_results_and_shared_evidence():
+    configurations = [
+        {"model_id": "hosted-one", "provider_type": "hosted_hf"},
+        {"model_id": "hosted-two:nscale", "provider_type": "hosted_hf"},
+        {"model_id": "local-one", "provider_type": "local_transformers"},
+        {"model_id": "local-two", "provider_type": "local_transformers"},
+    ]
+    seen = []
+    released = []
+
+    def factory(model_id, provider_type):
+        provider = (
+            "local_transformers"
+            if provider_type == "local_transformers"
+            else "huggingface_api"
+        )
+        answers = [RuntimeError("controlled failure")] if model_id == "local-one" else [f"Answer from {model_id}."]
+        return ReleasableFakeGenerator(model_id, provider, answers, seen, released)
+
+    result = run_all_generators(
+        "Question", EVIDENCE, configurations, claims, FakeVerifier(), keep, safe,
+        {"label": "high"}, factory,
+    )
+
+    assert list(result["model_results"]) == [item["model_id"] for item in configurations]
+    assert all(item is EVIDENCE for item in seen)
+    assert result["model_results"]["hosted-one"]["provider"] == "huggingface_api"
+    assert result["model_results"]["local-two"]["provider"] == "local_transformers"
+    assert result["model_results"]["local-one"]["status"] == "failed"
+    assert result["model_results"]["local-two"]["status"] == "success"
+    assert released == [item["model_id"] for item in configurations]
+    assert all(item["latency_seconds"] >= 0 for item in result["model_results"].values())
 
 
 def test_refusal_bypasses_nli_and_revision_is_verified():

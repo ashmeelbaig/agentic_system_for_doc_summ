@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from time import perf_counter
 from typing import Any, Callable, Dict, Iterable
 
 from src.answer_revision_agent import is_refusal_answer
@@ -38,10 +39,21 @@ def run_all_generators(
     """Run independent answer guardrails for many models over shared evidence."""
     model_results = {}
 
-    for model_id in model_ids:
+    for configured_model in model_ids:
+        if isinstance(configured_model, dict):
+            model_id = configured_model["model_id"]
+            provider_type = configured_model["provider_type"]
+        else:
+            model_id = configured_model
+            provider_type = None
         generator = None
+        started = perf_counter()
         try:
-            generator = generator_factory(model_id)
+            generator = (
+                generator_factory(model_id, provider_type)
+                if provider_type is not None
+                else generator_factory(model_id)
+            )
             draft = generator.generate_answer(query, evidence_chunks)
             claims, verification, score = _verify(
                 draft, evidence_chunks, claim_extractor, claim_verifier
@@ -87,6 +99,7 @@ def run_all_generators(
                 "faithfulness_score": final_score,
                 "revision_decision": _decision_dict(revision),
                 "final_safety_gate": _decision_dict(safety),
+                "latency_seconds": perf_counter() - started,
             }
         except Exception as exc:
             # Generator exceptions are intentionally normalized by the API adapter.
@@ -94,7 +107,13 @@ def run_all_generators(
             model_results[model_id] = {
                 "status": "failed",
                 "model_name": model_id,
-                "provider": getattr(generator, "provider", "huggingface_api"),
+                "provider": getattr(
+                    generator,
+                    "provider",
+                    "local_transformers"
+                    if provider_type == "local_transformers"
+                    else "huggingface_api",
+                ),
                 "attempted_methods": list(
                     getattr(generator, "attempted_methods", [])
                 ),
@@ -102,7 +121,14 @@ def run_all_generators(
                     getattr(generator, "attempt_failures", [])
                 ),
                 "error": str(exc) if exc.__class__.__name__ == "HuggingFaceGenerationError" else "Model generation failed.",
+                "latency_seconds": perf_counter() - started,
             }
+            if exc.__class__.__name__ == "LocalTransformersGenerationError":
+                model_results[model_id]["error"] = str(exc)
+        finally:
+            release = getattr(generator, "release", None)
+            if callable(release):
+                release()
 
     comparison = []
     for model_id, result in model_results.items():
@@ -112,10 +138,12 @@ def run_all_generators(
         comparison.append({
             "model_name": model_id,
             "status": result["status"],
+            "provider": result.get("provider"),
             "faithfulness_score": score.get("faithfulness_score"),
             "revision_decision": revision.get("decision"),
             "safety_action": safety.get("action"),
             "is_refusal_answer": result.get("is_refusal_answer"),
+            "latency_seconds": result.get("latency_seconds", 0.0),
         })
 
     return {"model_results": model_results, "model_comparison": comparison}

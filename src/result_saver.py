@@ -112,8 +112,9 @@ def save_multi_model_result_to_json(
     retrieval: Dict[str, Any],
     model_results: Dict[str, Any],
     model_comparison: List[Dict[str, Any]],
+    generator_mode: str = "multi_hf",
 ) -> Path:
-    """Save shared retrieval and all API model results in one JSON file."""
+    """Save shared retrieval and all hosted/local model results in one JSON file."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -122,7 +123,7 @@ def save_multi_model_result_to_json(
     data = {
         "pdf_name": pdf_name,
         "query": query,
-        "generator_mode": "multi_hf",
+        "generator_mode": generator_mode,
         "retrieval": retrieval,
         "model_results": model_results,
         "model_comparison": model_comparison,

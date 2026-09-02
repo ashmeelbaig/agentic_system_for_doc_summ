@@ -22,6 +22,8 @@ outputs/
 # Model/cache files
 .cache/
 models/
+huggingface_cache/
+outputs/*.tmp
 *.index
 *.faiss
 
