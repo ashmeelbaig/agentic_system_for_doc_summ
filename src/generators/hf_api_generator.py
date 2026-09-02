@@ -11,6 +11,11 @@ REFUSAL_ANSWER = (
     "to answer this question."
 )
 
+CHAT_FIRST_MODEL_IDS = {
+    "Qwen/Qwen2.5-0.5B-Instruct",
+    "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+}
+
 
 class HuggingFaceGenerationError(RuntimeError):
     """A controlled remote-generation failure that contains no credentials."""
@@ -145,6 +150,8 @@ class HuggingFaceAPIGenerator(BaseAnswerGenerator):
         return HuggingFaceGenerationError(detail)
 
     def _method_order(self) -> List[str]:
+        if self.model_id in CHAT_FIRST_MODEL_IDS:
+            return ["chat_completion", "text_generation"]
         if "flan-t5" in self.model_id.lower():
             return ["text2text_generation", "text_generation"]
         return ["text_generation", "chat_completion"]

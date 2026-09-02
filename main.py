@@ -33,7 +33,7 @@ from src.result_saver import (
     save_multi_model_result_to_json,
     save_result_to_json,
 )
-from src.generators.factory import get_configured_model_ids
+from src.generators.factory import get_all_configured_models, get_configured_model_ids
 from src.generators.multi_model_runner import run_all_generators
 from src.baseline import create_baseline_result, print_baseline_result
 from src.display import (
@@ -169,7 +169,7 @@ def get_generator_mode():
 
     mode = os.getenv("GENERATOR_MODE", "quality").lower().strip()
 
-    if mode in {"fast", "quality", "quality_plus", "multi_hf"}:
+    if mode in {"fast", "quality", "quality_plus", "multi_hf", "multi_model"}:
         return mode
 
     return "quality"
@@ -278,7 +278,7 @@ def print_retrieval_attempts(attempts):
 def main():
     load_dotenv()
     generator_mode = get_generator_mode()
-    if generator_mode == "multi_hf":
+    if generator_mode in {"multi_hf", "multi_model"}:
         print_multi_hf_startup_check()
     print_header("Claim Grounded Agentic RAG Prototype")
 
@@ -312,8 +312,11 @@ def main():
 
     generator_model_name = None
     answer_generator = None
-    if generator_mode == "multi_hf":
-        print("\nUsing Hugging Face API multi-model generation.")
+    if generator_mode in {"multi_hf", "multi_model"}:
+        if generator_mode == "multi_model":
+            print("\nUsing hosted and local multi-model generation.")
+        else:
+            print("\nUsing Hugging Face API multi-model generation.")
     else:
         generator_model_name = get_generator_model_name()
         print(f"\nLoading answer generation model: {generator_model_name}")
@@ -514,8 +517,19 @@ def main():
         # ---------------------------------------------------------
         # Multi-model HF API path. Retrieval and reranking above are shared.
         # ---------------------------------------------------------
-        if generator_mode == "multi_hf":
-            model_ids = get_configured_model_ids()
+        if generator_mode in {"multi_hf", "multi_model"}:
+            if generator_mode == "multi_model":
+                model_ids = get_all_configured_models()
+                if not any(
+                    item["provider_type"] == "local_transformers"
+                    for item in model_ids
+                ):
+                    print(
+                        "No local models configured. "
+                        "Skipping local Transformers generation."
+                    )
+            else:
+                model_ids = get_configured_model_ids()
             multi_result = run_all_generators(
                 query=query,
                 evidence_chunks=results,
@@ -543,6 +557,7 @@ def main():
                 retrieval=retrieval_output,
                 model_results=multi_result["model_results"],
                 model_comparison=multi_result["model_comparison"],
+                generator_mode=generator_mode,
             )
             print("\nResult saved successfully.")
             print(f"Saved file: {saved_file}")

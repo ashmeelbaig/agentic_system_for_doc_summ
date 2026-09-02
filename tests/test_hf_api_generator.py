@@ -92,6 +92,38 @@ def test_qwen_falls_back_to_chat_completion(monkeypatch):
     assert generator.attempted_methods == ["text_generation", "chat_completion"]
 
 
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "Qwen/Qwen2.5-0.5B-Instruct",
+        "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    ],
+)
+def test_weak_chat_models_use_chat_completion_first(monkeypatch, model_id):
+    monkeypatch.setenv("HF_TOKEN", "placeholder-secret")
+    client = RecordingClient()
+    generator = HuggingFaceAPIGenerator(model_id, client=client)
+
+    assert generator.model_id == model_id
+    assert generator.generate_answer("Question?", [{"text": "Evidence."}]) == "Chat answer."
+    assert [call[0] for call in client.calls] == ["chat_completion"]
+
+
+def test_weak_chat_model_falls_back_to_text_generation(monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "placeholder-secret")
+    client = RecordingClient()
+    client.chat_completion = lambda **kwargs: (_ for _ in ()).throw(
+        RuntimeError("chat task not supported")
+    )
+    generator = HuggingFaceAPIGenerator(
+        "TinyLlama/TinyLlama-1.1B-Chat-v1.0", client=client
+    )
+
+    assert generator.generate_answer("Question?", [{"text": "Evidence."}]) == "Text generation answer."
+    assert generator.attempted_methods == ["chat_completion", "text_generation"]
+    assert generator.attempt_failures[0]["method"] == "chat_completion"
+
+
 def test_token_is_never_in_controlled_error(monkeypatch):
     secret = "highly-sensitive-placeholder"
     monkeypatch.setenv("HF_TOKEN", secret)
