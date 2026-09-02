@@ -216,3 +216,23 @@ def print_score_summary(score_summary: Dict[str, Any]) -> None:
         "Final faithfulness score: "
         f"{float(score_summary.get('faithfulness_score', 0.0)):.2f}"
     )
+
+
+def print_model_comparison(model_results: Dict[str, Dict[str, Any]]) -> None:
+    """Print a compact, readable summary for multi-model API runs."""
+    print_header("Model Comparison")
+    for model_id, result in model_results.items():
+        print(f"Model: {model_id}")
+        print(f"Status: {result.get('status', 'failed')}")
+        if result.get("status") == "success":
+            score = result.get("faithfulness_score", {})
+            revision = result.get("revision_decision", {})
+            safety = result.get("final_safety_gate", {})
+            print(f"Final answer: {result.get('final_answer', '')}")
+            print(f"Faithfulness score: {score.get('faithfulness_score', 0.0):.2f}")
+            print(f"Revision decision: {revision.get('decision', 'N/A')}")
+            print(f"Final safety action: {safety.get('action', 'N/A')}")
+            print(f"Refusal: {str(result.get('is_refusal_answer', False)).lower()}")
+        else:
+            print(f"Error: {result.get('error', 'Model generation failed.')}")
+        print("")

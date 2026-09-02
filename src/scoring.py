@@ -33,17 +33,17 @@ def calculate_faithfulness_score(verification_results):
     not_enough_evidence_claims = 0
 
     for result in verification_results:
-        label = result.get("label", "")
+        label = str(result.get("label", "")).lower()
 
-        if label == "Supported":
+        if label == "supported":
             supported_claims += 1
-        elif label == "Partially supported":
+        elif label == "partially supported":
             partially_supported_claims += 1
-        elif label == "Unsupported":
+        elif label == "unsupported":
             unsupported_claims += 1
-        elif label == "Contradicted":
+        elif label == "contradicted":
             contradicted_claims += 1
-        elif label == "Not enough evidence":
+        elif label == "not enough evidence":
             not_enough_evidence_claims += 1
         else:
             unsupported_claims += 1

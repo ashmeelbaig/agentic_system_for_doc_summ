@@ -39,8 +39,10 @@ You are answering questions about technical documents.
 
 Use only the provided document context.
 Do not use outside knowledge.
-Write a clear, specific answer in 3 to 5 sentences.
-Mention the most relevant source/page information if available.
+Answer the question directly in 1 to 3 short sentences.
+Start with the answer, not with a description of the documents or your process.
+Include only details needed to answer the question. Do not copy long passages.
+Do not include source/page metadata unless the question asks for citations.
 If the context is insufficient, say: "The document context does not contain enough information."
 
 Document context:
@@ -213,7 +215,7 @@ Grounded answer:
         lowered_answer = answer.lower()
 
         if any(phrase in lowered_answer for phrase in weak_phrases):
-            return False
+            return True
 
         if answer.count(",") >= 3 and len(words) < 15:
             return True

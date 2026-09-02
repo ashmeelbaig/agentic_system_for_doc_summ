@@ -4,6 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from src.answer_revision_agent import is_refusal_answer
+
 def normalize_retrieved_evidence_item(item: Any) -> Dict[str, Any]:
     """
     Normalize retrieved evidence before saving to JSON.
@@ -89,6 +91,7 @@ def save_result_to_json(
 
         "claim_grounded_rag": {
             "generated_answer": answer,
+            "is_refusal_answer": is_refusal_answer(answer),
             "retrieved_evidence": retrieved_evidence,
             "extracted_claims": claims,
             "verification_results": verification_results,
@@ -99,6 +102,33 @@ def save_result_to_json(
     with open(file_path, "w", encoding="utf-8") as file:
         json.dump(result_data, file, indent=4, ensure_ascii=False)
 
+    return file_path
+
+
+def save_multi_model_result_to_json(
+    output_dir: str,
+    pdf_name: str,
+    query: str,
+    retrieval: Dict[str, Any],
+    model_results: Dict[str, Any],
+    model_comparison: List[Dict[str, Any]],
+) -> Path:
+    """Save shared retrieval and all API model results in one JSON file."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_path = output_path / f"result_{timestamp}_{make_safe_filename(query)}.json"
+
+    data = {
+        "pdf_name": pdf_name,
+        "query": query,
+        "generator_mode": "multi_hf",
+        "retrieval": retrieval,
+        "model_results": model_results,
+        "model_comparison": model_comparison,
+    }
+    with open(file_path, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4, ensure_ascii=False)
     return file_path
 
 

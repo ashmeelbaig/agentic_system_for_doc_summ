@@ -36,6 +36,21 @@ The prototype uses open source Hugging Face models.
 
 The current claim verification step uses semantic similarity with the embedding model. In the final version, this can be replaced or improved using a Natural Language Inference model.
 
+## Multi-model Hugging Face API mode
+
+The `multi_hf` mode retrieves and reranks evidence once, then reuses that same evidence
+for every configured Hugging Face model. Claim extraction, NLI verification, revision,
+and the final safety gate run independently for each answer. All results are saved in one
+JSON file under `model_results` with a shared `retrieval` section.
+
+1. Install dependencies with `pip install -r requirements.txt`.
+2. Copy `.env.example` to `.env` and replace the placeholder `HF_TOKEN` locally.
+3. Ensure `GENERATOR_MODE=multi_hf` and optionally edit `HF_MODEL_IDS`.
+4. Run `python main.py`.
+
+The `.env` file is ignored by Git. Never place a real token in `.env.example` or commit it.
+The existing `fast`, `quality`, and `quality_plus` local modes remain available.
+
 ## System Workflow
 
 ```text
