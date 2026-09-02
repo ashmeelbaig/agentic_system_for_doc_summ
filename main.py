@@ -1,6 +1,12 @@
 from pathlib import Path
 import os
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # Keeps existing local modes usable before optional deps install.
+    def load_dotenv():
+        return False
+
 from src.retrieval_retry import retrieve_with_retries, confidence_to_dict
 from src.safety_guardrails import (
     check_user_query_safety,
@@ -11,6 +17,7 @@ from src.answer_revision_agent import (
     build_revision_query,
     decide_answer_revision,
     final_safety_gate,
+    is_refusal_answer,
 )
 from src.document_collection import prepare_metadata_chunks_from_pdfs
 from src.document_loader import load_pdf_pages
@@ -21,7 +28,13 @@ from src.generator import AnswerGenerator
 from src.claim_extractor import extract_claims
 from src.nli_verifier import NLIClaimVerifier
 from src.scoring import calculate_faithfulness_score
-from src.result_saver import save_result_to_json
+from src.result_saver import (
+    normalize_retrieved_evidence_item,
+    save_multi_model_result_to_json,
+    save_result_to_json,
+)
+from src.generators.factory import get_configured_model_ids
+from src.generators.multi_model_runner import run_all_generators
 from src.baseline import create_baseline_result, print_baseline_result
 from src.display import (
     print_header,
@@ -30,6 +43,7 @@ from src.display import (
     print_generated_answer,
     print_claim_table,
     print_score_summary,
+    print_model_comparison,
 )
 
 
@@ -155,10 +169,20 @@ def get_generator_mode():
 
     mode = os.getenv("GENERATOR_MODE", "quality").lower().strip()
 
-    if mode in {"fast", "quality"}:
+    if mode in {"fast", "quality", "quality_plus", "multi_hf"}:
         return mode
 
     return "quality"
+
+
+def print_multi_hf_startup_check():
+    """Report whether required settings exist without revealing their values."""
+    token_loaded = bool(os.getenv("HF_TOKEN", "").strip())
+    model_ids_loaded = bool(os.getenv("HF_MODEL_IDS", "").strip())
+    print(
+        "HF multi-model configuration: "
+        f"token_loaded={token_loaded}, model_ids_loaded={model_ids_loaded}"
+    )
 
 
 def get_generator_model_name():
@@ -168,12 +192,16 @@ def get_generator_model_name():
     Supported modes:
     - fast: lightweight local testing
     - quality: stronger answer generation
+    - quality_plus: largest optional answer generation model
     """
 
     mode = get_generator_mode()
 
     if mode == "fast":
         return "google/flan-t5-small"
+
+    if mode == "quality_plus":
+        return "google/flan-t5-large"
 
     return "google/flan-t5-base"
 
@@ -248,6 +276,10 @@ def print_retrieval_attempts(attempts):
 
 
 def main():
+    load_dotenv()
+    generator_mode = get_generator_mode()
+    if generator_mode == "multi_hf":
+        print_multi_hf_startup_check()
     print_header("Claim Grounded Agentic RAG Prototype")
 
     pdf_files = list_pdf_files(DATA_DIR)
@@ -278,10 +310,14 @@ def main():
     print("\nLoading evidence reranker...")
     reranker = EvidenceReranker()
 
-    generator_model_name = get_generator_model_name()
-
-    print(f"\nLoading answer generation model: {generator_model_name}")
-    answer_generator = AnswerGenerator(model_name=generator_model_name)
+    generator_model_name = None
+    answer_generator = None
+    if generator_mode == "multi_hf":
+        print("\nUsing Hugging Face API multi-model generation.")
+    else:
+        generator_model_name = get_generator_model_name()
+        print(f"\nLoading answer generation model: {generator_model_name}")
+        answer_generator = AnswerGenerator(model_name=generator_model_name)
 
     print("\nLoading NLI claim verifier...")
     claim_verifier = NLIClaimVerifier()
@@ -312,6 +348,7 @@ def main():
             baseline_result = create_baseline_result(query, answer, [])
             baseline_result["safety_guardrail"] = query_safety
             baseline_result["is_refused"] = True
+            baseline_result["is_refusal_answer"] = True
             baseline_result["refusal_reason"] = query_safety["reason"]
 
             print_generated_answer(answer)
@@ -413,6 +450,7 @@ def main():
                 baseline_result["retrieval_attempts"] = retrieval_attempts
                 baseline_result["used_query"] = used_query
                 baseline_result["is_refused"] = True
+                baseline_result["is_refusal_answer"] = True
                 baseline_result["document_prompt_injection_detected"] = bool(
                     prompt_injection_matches
                 )
@@ -474,6 +512,43 @@ def main():
             continue
 
         # ---------------------------------------------------------
+        # Multi-model HF API path. Retrieval and reranking above are shared.
+        # ---------------------------------------------------------
+        if generator_mode == "multi_hf":
+            model_ids = get_configured_model_ids()
+            multi_result = run_all_generators(
+                query=query,
+                evidence_chunks=results,
+                model_ids=model_ids,
+                claim_extractor=extract_claims,
+                claim_verifier=claim_verifier,
+                revision_function=decide_answer_revision,
+                final_safety_gate=final_safety_gate,
+                retrieval_confidence=retrieval_confidence_dict,
+            )
+            print_model_comparison(multi_result["model_results"])
+
+            retrieval_output = {
+                "used_query": used_query,
+                "retrieval_confidence": retrieval_confidence_dict,
+                "retrieval_attempts": retrieval_attempts,
+                "retrieved_evidence": [
+                    normalize_retrieved_evidence_item(item) for item in results
+                ],
+            }
+            saved_file = save_multi_model_result_to_json(
+                output_dir=str(OUTPUT_DIR),
+                pdf_name=display_name,
+                query=query,
+                retrieval=retrieval_output,
+                model_results=multi_result["model_results"],
+                model_comparison=multi_result["model_comparison"],
+            )
+            print("\nResult saved successfully.")
+            print(f"Saved file: {saved_file}")
+            continue
+
+        # ---------------------------------------------------------
         # 3. Generate draft answer
         # ---------------------------------------------------------
         answer = answer_generator.generate_answer(
@@ -492,6 +567,7 @@ def main():
             baseline_result["retrieval_attempts"] = retrieval_attempts
             baseline_result["used_query"] = used_query
             baseline_result["is_refused"] = False
+            baseline_result["is_refusal_answer"] = is_refusal_answer(answer)
             baseline_result["document_prompt_injection_detected"] = bool(
                 prompt_injection_matches
             )
@@ -508,10 +584,13 @@ def main():
         # ---------------------------------------------------------
         # 5. Verify draft claims with NLI
         # ---------------------------------------------------------
-        verification_results = verify_claims_with_selected_verifier(
-            claims=claims,
-            retrieved_chunks=results,
-            verifier=claim_verifier,
+        verification_results = (
+            [] if is_refusal_answer(answer)
+            else verify_claims_with_selected_verifier(
+                claims=claims,
+                retrieved_chunks=results,
+                verifier=claim_verifier,
+            )
         )
 
         print_claim_table(verification_results)
@@ -531,6 +610,7 @@ def main():
             answer=answer,
             verification_results=verification_results,
             score_summary=score_summary,
+            retrieval_confidence=retrieval_confidence,
         )
 
         print("\nAnswer Revision Decision")
@@ -565,10 +645,13 @@ def main():
 
             revised_claims = extract_claims(revised_answer)
 
-            revised_verification_results = verify_claims_with_selected_verifier(
-                claims=revised_claims,
-                retrieved_chunks=results,
-                verifier=claim_verifier,
+            revised_verification_results = (
+                [] if is_refusal_answer(revised_answer)
+                else verify_claims_with_selected_verifier(
+                    claims=revised_claims,
+                    retrieved_chunks=results,
+                    verifier=claim_verifier,
+                )
             )
 
             print_claim_table(revised_verification_results)
@@ -620,6 +703,7 @@ def main():
                 "action": final_safety_decision.action,
             }
             baseline_result["is_refused"] = not final_safety_decision.is_safe
+            baseline_result["is_refusal_answer"] = is_refusal_answer(final_answer)
 
             baseline_result["revision_decision"] = {
                 "decision": revision_decision.decision,

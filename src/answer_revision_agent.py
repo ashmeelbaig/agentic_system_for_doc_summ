@@ -10,6 +10,20 @@ STOPWORDS = {
     "explain", "describe", "discuss", "main", "role", "purpose"
 }
 
+REFUSAL_PHRASES = (
+    "does not contain enough information",
+    "do not provide enough reliable evidence",
+    "not sufficient to generate a clear answer",
+    "no relevant evidence was found",
+    "cannot help with this request",
+)
+
+
+def is_refusal_answer(answer: str) -> bool:
+    """Return True for the system's known refusal/insufficient-evidence answers."""
+    normalized = " ".join((answer or "").lower().split())
+    return any(phrase in normalized for phrase in REFUSAL_PHRASES)
+
 
 @dataclass
 class RevisionDecision:
@@ -87,6 +101,7 @@ def decide_answer_revision(
     answer: str,
     verification_results: List[Dict[str, Any]],
     score_summary: Dict[str, Any],
+    retrieval_confidence: Any = None,
 ) -> RevisionDecision:
     """
     Rule-based Answer Revision Agent V1.
@@ -101,6 +116,25 @@ def decide_answer_revision(
 
     total_claims = int(score_summary.get("total_claims", len(verification_results)))
     faithfulness = float(score_summary.get("faithfulness_score", 0.0))
+    confidence_label = (
+        retrieval_confidence.get("label")
+        if isinstance(retrieval_confidence, dict)
+        else getattr(retrieval_confidence, "label", retrieval_confidence)
+    )
+    high_confidence = str(confidence_label or "").lower() == "high"
+
+    if is_refusal_answer(answer) and high_confidence:
+        return RevisionDecision(
+            decision="revise",
+            reason="The draft refused despite high-confidence retrieved evidence.",
+            instruction=(
+                "Replace the refusal with a short, direct answer based on the strongest "
+                "retrieved evidence. State only the supported answer in 1 to 3 sentences. "
+                "Do not say that evidence is insufficient and do not discuss the revision."
+            ),
+            answer_focus=focus,
+            should_reverify=True,
+        )
 
     # Case 1: no useful claims were extracted
     if total_claims == 0:
@@ -121,8 +155,9 @@ def decide_answer_revision(
             decision="revise",
             reason="At least one generated claim contradicts the retrieved evidence.",
             instruction=(
-                "Revise the answer by correcting or removing any contradicted claims. "
-                "Only include statements that are supported by the provided evidence."
+                "Rewrite the answer using the strongest supporting passages. Correct or "
+                "remove contradicted claims and give a short, direct answer in 1 to 3 "
+                "sentences. Do not refuse when the evidence supports an answer."
             ),
             answer_focus=focus,
             should_reverify=True,
@@ -187,7 +222,8 @@ def build_revision_query(original_query: str, instruction: str) -> str:
         f"{original_query}\n\n"
         f"Revision instruction: {instruction}\n"
         f"Use only the provided retrieved evidence. "
-        f"Do not add information that is not supported by the evidence."
+        f"Do not add information that is not supported by the evidence. "
+        f"Return only the revised answer, with no preamble or explanation."
     )
 
 

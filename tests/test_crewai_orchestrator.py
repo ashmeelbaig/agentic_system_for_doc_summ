@@ -133,3 +133,17 @@ def test_final_safety_gate_refusal_is_returned():
     assert result["final_safety_gate"]["action"] == "refuse"
     assert result["final_answer"] == REFUSAL_ANSWER
     assert result["is_refused"] is True
+    assert result["is_refusal_answer"] is True
+
+
+def test_refusal_draft_is_not_sent_to_nli_and_high_confidence_triggers_revision():
+    refusal = "The document context does not contain enough information."
+    generator = FakeAnswerGenerator([refusal, REVISED])
+    verifier = FakeVerifier(["Supported"])
+
+    result = run_workflow(FakeRetriever([STRONG]), generator, verifier)
+
+    assert generator.call_count == 2
+    assert verifier.call_count == 1
+    assert result["final_answer"] == REVISED
+    assert result["is_refusal_answer"] is False

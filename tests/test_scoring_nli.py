@@ -31,3 +31,18 @@ def test_faithfulness_score_still_supports_old_similarity_labels():
     assert score["partially_supported_claims"] == 1
     assert score["unsupported_claims"] == 1
     assert score["faithfulness_score"] == 1 / 3
+
+
+def test_one_unsupported_atomic_claim_does_not_fail_supported_claims():
+    verification_results = [
+        {"claim": "Adversarial attack risk.", "label": "Supported"},
+        {"claim": "Foundation model misuse risk.", "label": "Supported"},
+        {"claim": "Unverified risk.", "label": "Not enough evidence"},
+    ]
+
+    score = calculate_faithfulness_score(verification_results)
+
+    assert score["total_claims"] == 3
+    assert score["supported_claims"] == 2
+    assert score["not_enough_evidence_claims"] == 1
+    assert score["faithfulness_score"] == 2 / 3

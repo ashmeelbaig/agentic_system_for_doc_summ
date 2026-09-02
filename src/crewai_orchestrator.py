@@ -10,6 +10,7 @@ from src.answer_revision_agent import (
     build_revision_query,
     decide_answer_revision,
     final_safety_gate,
+    is_refusal_answer,
 )
 from src.claim_extractor import extract_claims
 from src.retrieval_retry import confidence_to_dict, retrieve_with_retries
@@ -103,6 +104,7 @@ def _refusal_result(
         "verification_results": [],
         "score_summary": _empty_score_summary(),
         "is_refused": True,
+        "is_refusal_answer": True,
     }
 
 
@@ -147,10 +149,13 @@ def run_crewai_claim_grounded_workflow(
     results, injection_matches = _sanitize_results(retrieval["results"])
     draft_answer = answer_generator.generate_answer(query, results)
     claims = extract_claims(draft_answer)
-    verification_results = claim_verifier.verify_claims(claims, results)
+    verification_results = (
+        [] if is_refusal_answer(draft_answer)
+        else claim_verifier.verify_claims(claims, results)
+    )
     score_summary = calculate_faithfulness_score(verification_results)
     revision = decide_answer_revision(
-        query, draft_answer, verification_results, score_summary
+        query, draft_answer, verification_results, score_summary, confidence
     )
 
     candidate_final_answer = draft_answer
@@ -164,8 +169,9 @@ def run_crewai_claim_grounded_workflow(
             revision_query, results
         )
         final_claims = extract_claims(candidate_final_answer)
-        final_verification_results = claim_verifier.verify_claims(
-            final_claims, results
+        final_verification_results = (
+            [] if is_refusal_answer(candidate_final_answer)
+            else claim_verifier.verify_claims(final_claims, results)
         )
         final_score_summary = calculate_faithfulness_score(
             final_verification_results
@@ -191,6 +197,7 @@ def run_crewai_claim_grounded_workflow(
         "verification_results": final_verification_results,
         "score_summary": final_score_summary,
         "is_refused": not safety.is_safe,
+        "is_refusal_answer": is_refusal_answer(final_answer),
         "document_prompt_injection_detected": bool(injection_matches),
         "prompt_injection_matches": injection_matches,
     }

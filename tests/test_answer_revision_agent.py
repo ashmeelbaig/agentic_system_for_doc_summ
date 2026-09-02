@@ -4,6 +4,7 @@ from src.answer_revision_agent import (
     build_revision_query,
     decide_answer_revision,
     final_safety_gate,
+    is_refusal_answer,
 )
 
 
@@ -58,6 +59,26 @@ def test_build_revision_query_contains_query_and_instruction():
 
     assert QUERY in revision_query
     assert instruction in revision_query
+
+
+def test_refusal_is_detected():
+    assert is_refusal_answer(
+        "The retrieved documents do not provide enough reliable evidence to answer this question."
+    )
+
+
+def test_high_confidence_refusal_is_rewritten_without_nli_results():
+    answer = "The document context does not contain enough information."
+    decision = decide_answer_revision(
+        QUERY,
+        answer,
+        [],
+        {"total_claims": 0, "faithfulness_score": 0.0},
+        {"label": "high"},
+    )
+
+    assert decision.decision == "revise"
+    assert "Do not say that evidence is insufficient" in decision.instruction
 
 
 def test_final_safety_gate_sends_supported_focused_answer():
