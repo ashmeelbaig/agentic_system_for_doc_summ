@@ -100,15 +100,23 @@ class HuggingFaceAPIGenerator(BaseAnswerGenerator):
     @staticmethod
     def _controlled_error(exc: Exception) -> HuggingFaceGenerationError:
         # Map only to fixed messages: raw HTTP errors may contain credentials.
-        message = str(exc).lower()
-        exception_name = type(exc).__name__.lower()
+        exception_chain = []
+        current = exc
+        seen = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            exception_chain.append(current)
+            current = current.__cause__ or current.__context__
+
+        message = " ".join(str(error).lower() for error in exception_chain)
+        exception_names = {type(error).__name__.lower() for error in exception_chain}
         response = getattr(exc, "response", None)
         status_code = getattr(response, "status_code", None) or getattr(
             exc, "status_code", None
         )
         if status_code == 429 or "429" in message or "rate limit" in message or "too many requests" in message:
             detail = "Hugging Face rate limit reached."
-        elif "timeout" in exception_name or "timeout" in message or "timed out" in message:
+        elif any("timeout" in name for name in exception_names) or "timeout" in message or "timed out" in message:
             detail = "Hugging Face generation timed out."
         elif status_code in (401, 403) or any(term in message for term in ("401", "403", "unauthorized", "forbidden", "gated", "access denied")):
             detail = "Hugging Face model access was denied. Check token permissions and model access."
@@ -116,7 +124,19 @@ class HuggingFaceAPIGenerator(BaseAnswerGenerator):
             detail = "Hugging Face model was not found. Check the model ID."
         elif (
             "not supported for task" in message and "provider" in message
-        ) or status_code in (502, 503, 504) or exception_name == "stopiteration" or any(term in message for term in ("loading", "503", "unavailable", "no provider", "provider error")):
+        ) or status_code in (502, 503, 504) or "stopiteration" in exception_names or any(
+            term in message
+            for term in (
+                "loading",
+                "503",
+                "provider is unavailable",
+                "no provider",
+                "provider error",
+                "model_not_supported",
+                "not supported by any provider",
+                "non-serverless model",
+            )
+        ):
             detail = "Hugging Face provider is unavailable for this model."
         elif status_code in (400, 405, 422) or any(term in message for term in ("task", "method", "not supported", "unsupported", "attribute")):
             detail = "Hugging Face rejected the generation task method for this model."

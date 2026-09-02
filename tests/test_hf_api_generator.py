@@ -141,3 +141,35 @@ def test_model_task_provider_mismatch_is_provider_error():
         )
     )
     assert str(error) == "Hugging Face provider is unavailable for this model."
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "provider is unavailable",
+        "no provider configured",
+        "model_not_supported",
+        "not supported by any provider",
+        "this is a non-serverless model",
+    ],
+)
+def test_provider_unavailable_messages_are_classified(message):
+    error = HuggingFaceAPIGenerator._controlled_error(RuntimeError(message))
+    assert str(error) == "Hugging Face provider is unavailable for this model."
+
+
+def test_wrapped_stop_iteration_is_classified_as_provider_unavailable():
+    try:
+        try:
+            raise StopIteration()
+        except StopIteration as exc:
+            raise RuntimeError() from exc
+    except RuntimeError as exc:
+        error = HuggingFaceAPIGenerator._controlled_error(exc)
+
+    assert str(error) == "Hugging Face provider is unavailable for this model."
+
+
+def test_unrecognized_provider_error_remains_unclassified():
+    error = HuggingFaceAPIGenerator._controlled_error(RuntimeError("unexpected failure"))
+    assert str(error) == "Hugging Face generation failed for an unclassified provider error."
